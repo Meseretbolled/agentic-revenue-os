@@ -43,7 +43,8 @@ def make_rig(conn, ro_conn, pack, clock, *, llm=None, world=None, runner=None, *
     orch = Orchestrator(
         conn, ro_conn, clock=clock, packs={pack.id: pack}, runner=runner or RulesRunner(llm),
         research=world.research, provider=world.router, identity=Identity(),
-        demo_mode=True, allowed_recipients=frozenset({CONTACT_EMAIL, "owner@example.test"}))
+        demo_mode=True, allowed_recipients=frozenset({CONTACT_EMAIL, "owner@example.test"}),
+        calendar=world.calendar)
     return Rig(orch, world, llm, deal_id, contact_id)
 
 

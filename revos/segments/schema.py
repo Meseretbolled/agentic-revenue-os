@@ -329,6 +329,7 @@ class CaseStudy(Strict):
     source_verified: bool                      # False: page listed in the brief, not yet matched
     label: Literal["public testimonial"]
     quote_dollar_figures_only: bool = False
+    use_for: list[str] = []                    # situations to use it in (routing, not a claim)
 
     @model_validator(mode="after")
     def _dollar_figures_only(self) -> "CaseStudy":

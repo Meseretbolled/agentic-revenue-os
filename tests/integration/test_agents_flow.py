@@ -73,7 +73,7 @@ def test_a_price_objection_is_classified_and_gets_a_case_study_proposal(conn, ro
     assert conn.execute("SELECT classification FROM messages WHERE message_id = %s",
                         (email.message_id,)).fetchone()[0] == "price_objection"
     fields = conn.execute("SELECT fields FROM deals").fetchone()[0]
-    assert fields["proposed_case_study"] == "pearle_vision"
+    assert fields["proposed_case_study"] == "global_beauty_brand"      # made for price objections
     assert "reply.classified" in [r[0] for r in conn.execute("SELECT event FROM audit_log")]
 
 

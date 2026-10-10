@@ -34,6 +34,7 @@ class AgentOutput:
     proposals: tuple[Proposal, ...] = ()
     stage_suggestion: DealStage | None = None      # a hint; the state machine still decides
     needs_human: str | None = None                 # set when the agent cannot continue by itself
+    handoff: str | None = None                     # proposals stand, but a person must take over
     notes: str = ""
 
 

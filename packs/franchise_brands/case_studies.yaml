@@ -11,6 +11,7 @@ case_studies:
       - {label: ROAS, value: "$15.52 vs $3.80"}
       - {label: CPA, value: "$19.23 vs $87.64"}
     quote_dollar_figures_only: true   # the page's percentages do not match its dollar figures
+    use_for: [price_objection, roi_proof]      # where we choose to use it; not a claim about the customer
     source_url: "https://cool.co/"
     source_verified: false
     label: public testimonial
@@ -18,6 +19,7 @@ case_studies:
     customer: Celebree
     summary: "More branded search."
     tags: [performance, brands]
+    use_for: [roi_proof]
     metrics:
       - {label: Branded search, value: "17.5% more"}
     source_url: "https://cool.co/"
@@ -27,12 +29,14 @@ case_studies:
     customer: NHN
     summary: "Uptick compared with Google Ads."
     tags: [performance, brands]
+    use_for: [roi_proof]
     metrics:
       - {label: Versus Google Ads, value: "50% uptick"}
     source_url: "https://cool.co/"
     source_verified: false
     label: public testimonial
   - id: pearle_vision
+    use_for: [first_touch]
     customer: Pearle Vision
     summary: "Franchisee campaigns."
     tags: [franchise, multi-location]
@@ -40,6 +44,7 @@ case_studies:
     source_verified: false
     label: public testimonial
   - id: campanile
+    use_for: [first_touch]
     customer: Campanile
     summary: "Localised hotel events."
     tags: [multi-location, hospitality]
@@ -47,6 +52,7 @@ case_studies:
     source_verified: false
     label: public testimonial
   - id: renault
+    use_for: [first_touch]
     customer: Renault
     summary: "Dealership ads."
     tags: [franchise, multi-location, automotive]

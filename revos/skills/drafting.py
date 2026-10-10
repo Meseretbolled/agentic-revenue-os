@@ -63,3 +63,17 @@ def draft_with_checks(
         if not retryable or attempts > max_regenerations:
             return DraftOutcome("needs_human", draft, attempts, result.issues, result.error)
         current = replace(request, feedback=tuple(i.message for i in result.issues))
+
+
+def render_case_study_reply(pack, study, context, original_subject: str) -> Draft:
+    """The answer to an objection: the pack's template filled with one case study's STORED facts.
+    No model writes any word of it, and it makes no claims about the prospect."""
+    template = pack.messaging.templates["case_study_reply"]
+    env = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)
+    values = {**context, "case_study": study, "original_subject": original_subject}
+    try:
+        subject = env.from_string(template.subject).render(values)
+        body = env.from_string(template.body).render(values)
+    except jinja2.UndefinedError as exc:
+        raise LLMError(f"cannot render the reply: {exc}") from exc
+    return Draft(" ".join(subject.split()), body.strip(), ())

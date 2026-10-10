@@ -4,6 +4,7 @@ from rich.table import Table
 
 from revos.adapters.clock import SystemClock
 from revos.db import connect
+from revos.policy.settings import resume_after_kill_switch, set_kill_switch
 from revos.runtime.queue import list_dead_letters, retry_dead_letter
 from revos.segments import PackError, load_all
 
@@ -22,6 +23,23 @@ def packs(packs_dir: str = typer.Argument("packs")) -> None:
         raise typer.Exit(1) from exc
     for name, pack in loaded.items():
         typer.echo(f"ok  {name} v{pack.meta.version}: {len(pack.case_studies)} case studies")
+
+
+@app.command("kill-switch")
+def kill_switch(state: str = typer.Argument(..., help="on or off")) -> None:
+    """Pause all outbound sending (on), or resume it and re-queue everything that waited (off)."""
+    if state not in {"on", "off"}:
+        typer.echo("state must be 'on' or 'off'", err=True)
+        raise typer.Exit(2)
+    with connect() as conn:
+        conn.autocommit = True
+        if state == "on":
+            set_kill_switch(conn, True, "operator")
+            typer.echo("kill switch ON: outbound actions will wait")
+        else:
+            released = resume_after_kill_switch(conn, SystemClock(), "operator")
+            typer.echo(f"kill switch OFF: {len(released)} held send(s) re-queued")
+
 
 
 @app.callback()

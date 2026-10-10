@@ -19,6 +19,7 @@ DEFAULT_SCHEDULES: tuple[Schedule, ...] = (
     Schedule("email.poll", 60),
     Schedule("tracking.stall_scan", 3600),
     Schedule("tracking.digest", 86400),
+    Schedule("queue.release_held", 300),      # safety net: sends stranded by the kill switch
 )
 
 

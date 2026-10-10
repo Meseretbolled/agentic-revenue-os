@@ -67,6 +67,11 @@ class UntrustedText:
                 "findings": [{"rule": f.rule_id, "snippet": f.snippet, "hidden": f.hidden}
                              for f in self.findings]}
 
+    def snippets(self, pattern: str) -> list[str]:
+        """Code-extracted matches of a regex from the visible text (for example a date). Only the
+        matched snippets leave; the text itself does not."""
+        return [m.group(0) for m in re.finditer(pattern, self._visible, re.IGNORECASE)]
+
     def contains_quote(self, quote: str) -> bool:
         """True if `quote` appears in the visible text (whitespace and case ignored)."""
         needle = normalise(quote)

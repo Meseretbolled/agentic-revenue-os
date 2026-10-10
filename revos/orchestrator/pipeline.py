@@ -7,6 +7,7 @@ effects. It is also the only caller of transition_deal for agent-driven moves.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -41,7 +42,8 @@ from revos.policy.config import PolicyConfig
 from revos.policy.engine import ActionRequest
 from revos.policy.gate import GateResult, run_approved_action
 from revos.policy.service import propose_action, release_veto_expired
-from revos.ports.calendar import Slot
+from revos.policy.settings import release_held_sends
+from revos.ports.calendar import Calendar, Slot
 from revos.ports.clock import Clock
 from revos.ports.provider import ActionProvider
 from revos.ports.research import Research
@@ -63,6 +65,9 @@ INTERNAL = {"enrich", "score", "classify_reply", "suppress_contact", "cancel_sch
             "snooze_ooo", "reminder", "attach_case_study", "generate_io", "lesson_write"}
 SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note"}
 FIELD_PREFIXES = ("fact:", "fact_source:")
+DEFAULT_SNOOZE_DAYS = 3        # no return date stated: look again after this long
+MAX_SNOOZE_DAYS = 14           # a stated date further out is cut back to this
+MAX_SNOOZES = 3                # after this many out-of-office replies a person looks
 
 
 def cause_of(exc: Exception) -> str:
@@ -89,6 +94,7 @@ class PipelineResult:
     reason: str | None = None
     action_id: UUID | None = None
     decision: str | None = None
+    label: str | None = None
     runs: tuple[tuple[str, str], ...] = ()
 
 
@@ -97,12 +103,23 @@ class Orchestrator:
                  packs: Mapping[str, Pack], runner: AgentRunner, research: Research,
                  provider: ActionProvider, identity: Identity | None = None, demo_mode: bool = True,
                  allowed_recipients: frozenset[str] = frozenset(),
-                 slots: Callable[[], tuple[Slot, ...]] = lambda: ()) -> None:
+                 calendar: Calendar | None = None) -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
-        self.demo_mode, self.allowed_recipients, self.slots = demo_mode, allowed_recipients, slots
+        self.demo_mode, self.allowed_recipients, self.calendar = demo_mode, allowed_recipients, calendar
         self.store = RunStore(conn)
+
+    def _slots(self) -> tuple[Slot, ...]:
+        if self.calendar is None:
+            return ()
+        now = self.clock.now()
+        return tuple(self.calendar.free_slots(now + timedelta(days=1), now + timedelta(days=8), 30)[:3])
+
+    def _last_outbound_subject(self, deal_id: UUID) -> str | None:
+        row = self.conn.execute("SELECT subject FROM messages WHERE deal_id = %s AND direction = "
+                                "'outbound' ORDER BY id DESC LIMIT 1", (deal_id,)).fetchone()
+        return row[0] if row else None
 
     # --- reading ----------------------------------------
     def _deal(self, deal_id: UUID) -> dict[str, Any]:
@@ -167,6 +184,7 @@ class Orchestrator:
                                 "cause": cause_of(exc)}, f"{cause_of(exc)}: {exc}", ())
         info = {"runner": self.runner.name, "notes": output.notes,
                 "stage_suggestion": output.stage_suggestion.value if output.stage_suggestion else None,
+                "handoff": output.handoff,
                 "tools_run": broker.executed, "tools_replayed": broker.replayed}
         if output.needs_human:
             return self._finish(row, deal_id, "needs_human", info, output.needs_human, ())
@@ -260,6 +278,9 @@ class Orchestrator:
             return False                      # an unknown template cannot be checked, so it fails
         study = next((c for c in pack.case_studies if c.id == payload.get("case_study_id")), None)
         extra = list(payload.get("approved_extra", []))
+        if payload.get("template") == "case_study_reply":
+            # the subject echoes our own earlier subject; never trust text the agent supplies here
+            extra = [self._last_outbound_subject(deal["id"]) or "your question"]
         approved, names = check_inputs(pack, template, self.identity, deal["company_name"] or "",
                                        deal["contact_name"], study, extra)
         draft = Draft(payload["subject"], payload["body"], tuple(
@@ -317,8 +338,64 @@ class Orchestrator:
                                                        "total": payload["total"]})))
         elif atype == "lesson_write":
             self._write_lesson(deal, payload)
-        else:                                                   # snooze_ooo, reminder
+        elif atype == "snooze_ooo":
+            self._snooze(deal, payload)
+        else:                                                   # reminder
             write_audit(self.conn, "orchestrator", f"agent.{atype}", deal_id, dict(payload))
+
+    def _snooze(self, deal: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
+        """Pause the lead until the stated return date, bounded, and wake it up with a timer."""
+        deal_id = deal["id"]
+        fields = deal["fields"] or {}
+        count = int(fields.get("snooze_count", 0))
+        if count >= MAX_SNOOZES:
+            raise ProposalRejected(f"{count} out-of-office replies already; a person should look")
+        now = self.clock.now()
+        source, stated = "default", payload.get("until")
+        until = now + timedelta(days=DEFAULT_SNOOZE_DAYS)
+        if stated:
+            until = datetime.combine(datetime.fromisoformat(stated).date(), time(9), tzinfo=UTC)
+            source = "stated"
+        bounded = min(max(until, now + timedelta(days=1)), now + timedelta(days=MAX_SNOOZE_DAYS))
+        self._merge_fields(deal_id, {"snoozed_until": bounded.isoformat(), "snooze_count": count + 1})
+        self.conn.execute(
+            "UPDATE actions SET run_at = greatest(run_at, %s) WHERE deal_id = %s AND type = "
+            "'follow_up' AND status IN ('approved', 'pending')", (bounded, deal_id))
+        record_event(self.conn, f"snooze:{deal_id}:{payload.get('message_id')}", "lead.snooze_ended",
+                     {"deal_id": str(deal_id), "until": bounded.isoformat()}, self.clock,
+                     run_at=bounded)
+        write_audit(self.conn, "orchestrator", "reply.snoozed", deal_id, {
+            "until": bounded.isoformat(), "source": source, "bounded": bounded != until,
+            "snooze_count": count + 1})
+
+    def resume_after_snooze(self, deal_id: UUID) -> PipelineResult:
+        """The snooze ended: follow up, unless the lead has since ended or opted out."""
+        deal = self._deal(deal_id)
+        suppressed = self.conn.execute("SELECT suppressed FROM contacts WHERE id = %s",
+                                       (deal["contact_id"],)).fetchone()
+        if DealStage(deal["stage"]) in {DealStage.DO_NOT_CONTACT, DealStage.CLOSED_LOST,
+                                       DealStage.CLOSED_WON, DealStage.HANDOFF} \
+                or (suppressed and suppressed[0]):
+            write_audit(self.conn, "orchestrator", "lead.snooze_skipped", deal_id,
+                        {"stage": deal["stage"]})
+            return PipelineResult("completed", deal["stage"], self.runner.name, "lead has ended")
+        self.conn.execute("UPDATE deals SET fields = fields - 'snoozed_until', updated_at = now() "
+                          "WHERE id = %s", (deal_id,))
+        step = f"outreach.snooze.{int((deal['fields'] or {}).get('snooze_count', 1))}"
+        try:
+            run = self.run_agent(deal_id, "outreach", step, input_={"kind": "follow_up"})
+            if run.status != "completed":
+                write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
+                            {"runner": self.runner.name, "reason": run.human_reason})
+                return PipelineResult("needs_human", deal["stage"], self.runner.name,
+                                      run.human_reason, runs=(("outreach", run.status),))
+            applied = self.apply_run(run, deal_id)
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            return PipelineResult("needs_human", deal["stage"], self.runner.name,
+                                  f"{cause_of(exc)}: {exc}")
+        return PipelineResult("action_proposed", deal["stage"], self.runner.name,
+                              action_id=applied[0]["action_id"] if applied else None,
+                              runs=(("outreach", "completed"),))
 
     def _merge_fields(self, deal_id: UUID, props: Mapping[str, Any]) -> None:
         self.conn.execute("UPDATE deals SET fields = fields || %s, updated_at = now() WHERE id = %s",
@@ -408,7 +485,8 @@ class Orchestrator:
 
     # --- a customer reply ---------------------------------------------------------------------------------
     def handle_reply(self, deal_id: UUID, email: Any) -> PipelineResult:
-        """Wrap, store and classify an inbound email. Flagged text is quarantined, never obeyed."""
+        """Wrap, store, classify and route an inbound email. Flagged text is quarantined, never
+        obeyed. A duplicate delivery of the same message does nothing."""
         deal = self._deal(deal_id)
         reply = UntrustedText.wrap("reply", email.message_id, email.body, is_html=email.is_html)
         self.conn.execute(
@@ -417,24 +495,42 @@ class Orchestrator:
             "ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING",
             (deal_id, deal["contact_id"], email.message_id, email.in_reply_to, email.subject,
              email.body, reply.flagged))
-        step = f"reply:{email.message_id}"
-        try:
-            run = self.run_agent(deal_id, "reply", step, input_={"message_id": email.message_id},
-                                 untrusted={"reply": reply})
-            if run.status != "completed":
+        runs: list[tuple[str, str]] = []
+
+        def done(status: str, reason: str | None = None, label: str | None = None,
+                 **kw: Any) -> PipelineResult:
+            if status == "needs_human":
                 write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
-                            {"runner": self.runner.name, "reason": run.human_reason})
-                return PipelineResult("needs_human", deal["stage"], self.runner.name,
-                                      run.human_reason, runs=(("reply", run.status),))
+                            {"runner": self.runner.name, "reason": reason, "label": label})
+            return PipelineResult(status, self._deal(deal_id)["stage"], self.runner.name, reason,
+                                  label=label, runs=tuple(runs), **kw)
+
+        try:
+            run = self.run_agent(
+                deal_id, "reply", f"reply:{email.message_id}",
+                input_={"message_id": email.message_id,
+                        "original_subject": self._last_outbound_subject(deal_id)},
+                untrusted={"reply": reply})
+            runs.append(("reply", run.status))
+            if run.status != "completed":
+                return done("needs_human", run.human_reason)
             self.apply_run(run, deal_id)
-            suggestion = run.output.get("stage_suggestion")
-            if suggestion:
-                self.advance(deal_id, DealStage(suggestion), "reply classified")
+            label = next((p["payload"]["label"] for p in run.proposals
+                          if p["action_type"] == "classify_reply"), None)
+            if run.output.get("stage_suggestion"):
+                self.advance(deal_id, DealStage(run.output["stage_suggestion"]), f"reply: {label}")
+            if label == "interested":                       # route: offer meeting times
+                meeting = self.run_agent(deal_id, "meeting", f"meeting:{email.message_id}",
+                                         slots=self._slots())
+                runs.append(("meeting", meeting.status))
+                if meeting.status != "completed":
+                    return done("needs_human", meeting.human_reason, label)
+                self.apply_run(meeting, deal_id)
+            if run.output.get("handoff"):
+                return done("needs_human", run.output["handoff"], label)
+            return done("completed", None, label)
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
-            return PipelineResult("needs_human", self._deal(deal_id)["stage"], self.runner.name,
-                                  f"{cause_of(exc)}: {exc}", runs=(("reply", "needs_human"),))
-        return PipelineResult("completed", self._deal(deal_id)["stage"], self.runner.name,
-                              runs=(("reply", "completed"),))
+            return done("needs_human", f"{cause_of(exc)}: {exc}")
 
     # --- sending ----------------------------------------
     def send_action(self, action_id: UUID) -> GateResult:
@@ -445,12 +541,49 @@ class Orchestrator:
         pack = self.packs[row["segment_id"]]
         result = run_approved_action(self.conn, action_id, self.provider, self.clock,
                                      self.policy_config(pack))
+        if result.status == "sent":
+            self._record_sent_email(action_id, result.provider_id, pack)
         if result.status == "sent" and row["type"] == "first_touch":
             self.advance(row["deal_id"], DealStage.OUTREACH, "first touch sent")
         elif result.status == "deferred" and result.run_at:
             record_event(self.conn, f"send:{action_id}:{result.run_at.isoformat()}", "action.send",
                          {"action_id": str(action_id)}, self.clock, run_at=result.run_at)
         return result
+
+    def _case_study_row(self, pack: Pack, slug: str) -> int:
+        study = next(c for c in pack.case_studies if c.id == slug)
+        return self.conn.execute(
+            "INSERT INTO case_studies (segment_id, slug, title, tags, metric, source_url, label) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (segment_id, slug) DO UPDATE SET "
+            "title = EXCLUDED.title, tags = EXCLUDED.tags, metric = EXCLUDED.metric, "
+            "source_url = EXCLUDED.source_url RETURNING id",
+            (pack.id, slug, study.customer, study.tags, study.metric_text, study.source_url,
+             study.label)).fetchone()[0]
+
+    def _record_sent_email(self, action_id: UUID, provider_id: str | None, pack: Pack) -> None:
+        """Keep our own copy of what went out, and which case study (if any) it carried."""
+        action = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT type, deal_id, contact_id, payload FROM actions WHERE id = %s",
+            (action_id,)).fetchone()
+        if action["type"] not in {"first_touch", "follow_up"} or not provider_id:
+            return
+        payload = action["payload"]
+        with self.conn.transaction():
+            self.conn.execute(
+                "INSERT INTO messages (deal_id, contact_id, direction, message_id, in_reply_to, "
+                "subject, body) VALUES (%s, %s, 'outbound', %s, %s, %s, %s) "
+                "ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING",
+                (action["deal_id"], action["contact_id"], provider_id, payload.get("in_reply_to"),
+                 payload.get("subject"), payload.get("body")))
+            slug = payload.get("case_study_id")
+            if slug:
+                message = self.conn.execute("SELECT id FROM messages WHERE message_id = %s",
+                                            (provider_id,)).fetchone()
+                self.conn.execute(
+                    "INSERT INTO case_study_sends (case_study_id, deal_id, message_id, action_id) "
+                    "VALUES (%s, %s, %s, %s) ON CONFLICT (action_id) DO NOTHING",
+                    (self._case_study_row(pack, slug), action["deal_id"],
+                     message[0] if message else None, action_id))
 
     def handlers(self) -> dict[str, Callable[[psycopg.Connection, Any], None]]:
         """Job handlers for the worker."""
@@ -464,5 +597,13 @@ class Orchestrator:
             for action_id in release_veto_expired(self.conn, self.clock):
                 self.send_action(action_id)
 
-        return {"lead.created": lead_created, "action.send": send, "action.veto_expired": veto_expired}
+        def snooze_ended(_conn: psycopg.Connection, job: Any) -> None:
+            self.resume_after_snooze(UUID(job.payload["deal_id"]))
+
+        def release_held(_conn: psycopg.Connection, job: Any) -> None:
+            release_held_sends(self.conn, self.clock)
+
+        return {"lead.created": lead_created, "action.send": send,
+                "action.veto_expired": veto_expired, "lead.snooze_ended": snooze_ended,
+                "queue.release_held": release_held}
 
