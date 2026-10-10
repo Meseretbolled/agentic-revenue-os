@@ -5,10 +5,23 @@ from rich.table import Table
 from revos.adapters.clock import SystemClock
 from revos.db import connect
 from revos.runtime.queue import list_dead_letters, retry_dead_letter
+from revos.segments import PackError, load_all
 
 app = typer.Typer(help="Agentic Revenue OS command line.")
 queue_app = typer.Typer(help="Inspect and repair the job queue.")
 app.add_typer(queue_app, name="queue")
+
+
+@app.command("packs")
+def packs(packs_dir: str = typer.Argument("packs")) -> None:
+    """Validate every segment pack; exits 1 and names the file and field on the first problem."""
+    try:
+        loaded = load_all(packs_dir)
+    except PackError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    for name, pack in loaded.items():
+        typer.echo(f"ok  {name} v{pack.meta.version}: {len(pack.case_studies)} case studies")
 
 
 @app.callback()

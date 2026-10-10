@@ -13,7 +13,7 @@ _COLUMN_FIELDS = ("tier", "total_score", "score_reason", "hubspot_deal_id")
 
 
 def _is_present(value: object) -> bool:
-    return value is not None and value != "" and value != [] and value != {}
+    return value is not None and value is not False and value not in ("", [], {})
 
 
 def _missing_fields(deal: dict, required: list[str] | tuple[str, ...]) -> list[str]:

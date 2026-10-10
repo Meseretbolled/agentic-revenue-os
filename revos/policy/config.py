@@ -1,15 +1,19 @@
 """Policy configuration as plain data.
 
-PACK PLUG-IN POINT (Step 4): a segment pack supplies `levels`, `max_discount_pct`, the caps,
-`send_window` and `veto_window_seconds`. Build it with a PolicyConfig.from_pack(pack) there; the
-engine itself never learns where the numbers came from.
+A segment pack supplies `levels`, `max_discount_pct`, the caps, `send_window` and
+`veto_window_seconds` through PolicyConfig.from_pack(pack); the engine itself never learns where
+the numbers came from.
 """
 
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from revos.domain.enums import AutonomyLevel
+
+if TYPE_CHECKING:
+    from revos.segments.loader import Pack
 
 L = AutonomyLevel
 
@@ -65,6 +69,29 @@ class PolicyConfig:
     cap_timezone: str = "UTC"                 # where "a day" starts for the caps
     demo_mode: bool = True                    # fail closed: empty allowlist means nobody
     allowed_recipients: frozenset[str] = frozenset()
+
+    @classmethod
+    def from_pack(
+        cls,
+        pack: "Pack",
+        *,
+        demo_mode: bool = True,
+        allowed_recipients: frozenset[str] = frozenset(),
+    ) -> "PolicyConfig":
+        """The pack's autonomy levels, caps, send window and discount limit become the policy."""
+        p = pack.policy
+        return cls(
+            levels=dict(p.autonomy_levels),
+            max_discount_pct=p.max_discount_pct,
+            daily_cap=p.daily_cap,
+            domain_cap=p.domain_cap,
+            veto_window_seconds=p.veto_window_seconds,
+            send_window=SendWindow(p.send_window.start_hour, p.send_window.end_hour,
+                                   tuple(p.send_window.days)),
+            default_timezone=p.default_timezone,
+            demo_mode=demo_mode,
+            allowed_recipients=allowed_recipients,
+        )
 
     @classmethod
     def from_env(cls) -> "PolicyConfig":

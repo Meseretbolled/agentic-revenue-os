@@ -1,0 +1,68 @@
+# Wording comes from the summary of cool.co in PROJECT_BRIEF.md section 7 (product names and
+# the customer pain). It is NOT verbatim site copy: replace with exact COOL wording before the
+# recording. Personal details are never written here; they are filled in by the drafting step and
+# must pass the claim check.
+source_note: >
+  Product names and pains from PROJECT_BRIEF.md section 7 (cool.co, read 2026-10-10). Not
+  verbatim copy; refine with the exact site wording.
+tone:
+  - Plain and specific; no hype words.
+  - "Short, a few sentences, one clear ask."
+  - Never state a number, customer or result that is not in the case-study library.
+
+pillars:
+  - id: local_at_scale
+    headline: "Local campaigns at scale, with brand consistency and compliance"
+    body: >
+      Cool AI brings Create, Activate and Optimize into one platform, including Franchise and
+      Multi-location and DCO and Creative Automation, so local campaigns can scale without
+      losing brand consistency or compliance.
+  - id: results_visible
+    headline: "See which campaigns work"
+    body: >
+      Media Activation and Measurement and Attribution sit in the same platform, so results and
+      attribution are in one place.
+
+templates:
+  first_touch:
+    subject: "Scaling local campaigns at {{ company }}"
+    body: |
+      Hi {{ first_name }},
+
+      {{ personalised_line }}
+
+      {{ pillar.body }}
+
+      {% if case_study %}One example: {{ case_study.customer }} ({{ case_study.label }}{% if case_study.metric_text %}, {{ case_study.metric_text }}{% endif %}). Source: {{ case_study.source_url }}
+      {% endif %}
+      Would a short call be useful?
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  follow_up:
+    subject: "Re: Scaling local campaigns at {{ company }}"
+    body: |
+      Hi {{ first_name }},
+
+      {{ personalised_line }}
+
+      {% if lesson %}{{ lesson.text }}
+      {% endif %}Happy to share more if it is useful.
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  case_study_reply:
+    subject: "Re: {{ original_subject }}"
+    body: |
+      Hi {{ first_name }},
+
+      Fair question. {{ case_study.customer }} is a public example ({{ case_study.label }}{% if case_study.metric_text %}: {{ case_study.metric_text }}{% endif %}). Source: {{ case_study.source_url }}
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}

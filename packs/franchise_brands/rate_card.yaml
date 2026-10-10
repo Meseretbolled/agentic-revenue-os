@@ -1,0 +1,9 @@
+# SAMPLE rate card. COOL publishes no rate card; every price here is invented for the demo and
+# must never be presented as COOL's pricing.
+label: "SAMPLE rate card: illustrative numbers for the demo, not COOL's pricing"
+currency: USD
+items:
+  - {id: creative_automation, name: "DCO and Creative Automation", unit: "per month", price: 2500}
+  - {id: multi_location, name: "Franchise and Multi-location", unit: "per location per month", price: 40}
+  - {id: media_fee, name: "Media activation management fee", unit: "percent of media spend", price: 12}
+  - {id: measurement, name: "Measurement and Attribution", unit: "per month", price: 1500}

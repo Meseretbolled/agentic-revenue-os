@@ -52,3 +52,26 @@ def conn2(test_db_url: str):
     """A second connection, to model a second worker or a restarted process."""
     with psycopg.connect(test_db_url, autocommit=True) as c:
         yield c
+
+
+# --- segment packs (no database needed) ---------------------------------------------------
+
+import shutil  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+PACKS_DIR = Path(__file__).resolve().parent.parent / "packs"
+PACK_ID = "franchise_brands"
+
+
+@pytest.fixture(scope="session")
+def pack():
+    from revos.segments import load_pack
+    return load_pack(PACKS_DIR / PACK_ID)
+
+
+@pytest.fixture
+def pack_copy(tmp_path: Path) -> Path:
+    """A throwaway copy of the real pack that a test can break."""
+    target = tmp_path / PACK_ID
+    shutil.copytree(PACKS_DIR / PACK_ID, target)
+    return target

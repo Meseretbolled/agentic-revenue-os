@@ -1,0 +1,64 @@
+# Public customer testimonials on cool.co, as summarised in PROJECT_BRIEF.md section 7. They are
+# testimonials, not verified results. Nothing here goes beyond what that section states.
+# source_url is the site page the brief lists as its source. source_verified stays false until
+# someone matches each testimonial to its exact page; do not present it as checked before then.
+case_studies:
+  - id: global_beauty_brand
+    customer: Global Beauty Brand
+    summary: "Performance results quoted as dollar figures only."
+    tags: [performance, brands, roas, cpa]
+    metrics:
+      - {label: ROAS, value: "$15.52 vs $3.80"}
+      - {label: CPA, value: "$19.23 vs $87.64"}
+    quote_dollar_figures_only: true   # the page's percentages do not match its dollar figures
+    source_url: "https://cool.co/"
+    source_verified: false
+    label: public testimonial
+  - id: celebree
+    customer: Celebree
+    summary: "More branded search."
+    tags: [performance, brands]
+    metrics:
+      - {label: Branded search, value: "17.5% more"}
+    source_url: "https://cool.co/"
+    source_verified: false
+    label: public testimonial
+  - id: nhn
+    customer: NHN
+    summary: "Uptick compared with Google Ads."
+    tags: [performance, brands]
+    metrics:
+      - {label: Versus Google Ads, value: "50% uptick"}
+    source_url: "https://cool.co/"
+    source_verified: false
+    label: public testimonial
+  - id: pearle_vision
+    customer: Pearle Vision
+    summary: "Franchisee campaigns."
+    tags: [franchise, multi-location]
+    source_url: "https://cool.co/"
+    source_verified: false
+    label: public testimonial
+  - id: campanile
+    customer: Campanile
+    summary: "Localised hotel events."
+    tags: [multi-location, hospitality]
+    source_url: "https://cool.co/"
+    source_verified: false
+    label: public testimonial
+  - id: renault
+    customer: Renault
+    summary: "Dealership ads."
+    tags: [franchise, multi-location, automotive]
+    source_url: "https://cool.co/"
+    source_verified: false
+    label: public testimonial
+  - id: air_france
+    customer: Air France
+    summary: "Campaigns across many markets and languages."
+    tags: [multi-location, brands]
+    metrics:
+      - {label: Reach, value: "100+ markets in 25 languages"}
+    source_url: "https://cool.co/"
+    source_verified: false
+    label: public testimonial

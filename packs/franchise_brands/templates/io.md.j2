@@ -1,0 +1,15 @@
+# Insertion Order {{ io_number | default("(number assigned on creation)") }}
+
+**SAMPLE TEMPLATE for the demonstration. Not a legal document. {{ rate_card_label }}**
+
+Advertiser: {{ advertiser_name }}
+Date: {{ date | default("") }}
+
+| Item | Unit | Quantity | Unit price | Amount |
+|---|---|---|---|---|
+{% for item in line_items %}| {{ item.name }} | {{ item.unit }} | {{ item.quantity }} | {{ item.unit_price }} | {{ item.amount }} |
+{% endfor %}
+Discount: {{ discount_pct | default(0) }}%
+**Total: {{ total }}**
+
+Terms: {{ terms | default("Sample terms to be replaced by the real agreement.") }}

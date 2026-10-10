@@ -1,0 +1,28 @@
+# Autonomy per action (Step 3 policy engine). Every action key must be listed: an allowlist the
+# pack owns. SAMPLE caps and windows for the demo.
+autonomy_levels:
+  enrich: auto
+  score: auto
+  crm_update: auto
+  crm_note: auto
+  first_touch.A: auto_with_veto     # top tier: sent after the veto window
+  first_touch.B: auto
+  first_touch.C: auto
+  follow_up: auto
+  reminder: auto
+  classify_reply: auto
+  snooze_ooo: auto
+  suppress_contact: auto
+  cancel_scheduled_sends: auto
+  attach_case_study: auto           # library items only (the policy checks this)
+  generate_io: auto
+  send_io: auto                     # only after the IO validator passes (policy hard block)
+  social_message: needs_approval    # draft-only in code; a person sends it
+  price_message: auto_with_veto     # price mentioned and inside the rate card
+
+max_discount_pct: 15                # SAMPLE; above this the IO is blocked for a manager
+daily_cap: 50
+domain_cap: 3
+veto_window_seconds: 60
+send_window: {start_hour: 9, end_hour: 17, days: [0, 1, 2, 3, 4]}
+default_timezone: UTC

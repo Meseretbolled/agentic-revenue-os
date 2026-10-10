@@ -1,0 +1,74 @@
+# Scoring configuration for this segment.
+# HONESTY NOTE: every weight, threshold and sample value below is our own starting point for the
+# demo. They are not COOL's numbers and should be tuned against real outcomes.
+
+lead_fields:
+  location_count:         {type: int,  description: "Number of locations, outlets or franchisees"}
+  is_franchise:           {type: bool, description: "Operates a franchise model"}
+  industry:               {type: str,  description: "Industry label"}
+  region:                 {type: str,  description: "Country code of the main market"}
+  annual_ad_spend_usd:    {type: int,  description: "Estimated yearly advertising spend in USD"}
+  contact_seniority:      {type: str,  description: "vp, head, director, c_level, manager, other"}
+  is_competitor:          {type: bool, description: "Competes with COOL"}
+  is_agency:              {type: bool, description: "Is an advertising agency"}
+  do_not_contact:         {type: bool, description: "Opted out or flagged do-not-contact"}
+  requested_demo:         {type: bool, description: "Asked for a demo"}
+  visited_pricing_page:   {type: bool, description: "Visited the pricing page"}
+  website_visits_30d:     {type: int,  description: "Website visits in the last 30 days"}
+  hiring_marketing_roles: {type: bool, description: "Has open marketing roles"}
+  local_marketing_pain_mentioned: {type: bool, description: "Mentioned local-marketing pain"}
+  replied:                {type: bool, description: "Replied to outreach"}
+  reply_sentiment:        {type: str,  description: "positive, neutral or negative"}
+  meeting_booked:         {type: bool, description: "A meeting is booked"}
+  clicked_case_study:     {type: bool, description: "Clicked a case study link"}
+
+weights: {fit: 0.5, intent: 0.3, engagement: 0.2}
+tiers: {A: 65, B: 40, C: 20}      # total >= A is tier A; below C is disqualified
+nudge_limit: 10                   # the LLM may move the total by at most this much (hard max 10)
+
+fit_rules:
+  - {id: locations_10_to_49, field: location_count, op: between, value: [10, 49], points: 15,
+     reason: "Operates {value} locations: enough scale for local campaigns"}
+  - {id: locations_50_plus, field: location_count, op: gte, value: 50, points: 30,
+     reason: "Operates {value} locations: strong multi-location scale"}
+  - {id: franchise_model, field: is_franchise, op: truthy, points: 20,
+     reason: "Franchise model: local operators need on-brand, compliant campaigns"}
+  - {id: target_industry, field: industry, op: in, points: 15,
+     value: [optical, hospitality, automotive, restaurants, childcare, retail, beauty, travel],
+     reason: "Industry '{value}' is in the target list"}
+  - {id: target_region, field: region, op: in, value: [US, CA, GB, FR, DE], points: 10,
+     reason: "Main market '{value}' is a target region"}
+  - {id: ad_spend_250k, field: annual_ad_spend_usd, op: gte, value: 250000, points: 20,
+     reason: "Yearly ad spend of about ${value} supports a platform"}
+  - {id: senior_contact, field: contact_seniority, op: in,
+     value: [vp, head, director, c_level], points: 10,
+     reason: "Contact is senior ({value}), so likely a buyer or strong influencer"}
+
+intent_rules:
+  - {id: requested_demo, field: requested_demo, op: truthy, points: 40,
+     reason: "Asked for a demo"}
+  - {id: visited_pricing, field: visited_pricing_page, op: truthy, points: 20,
+     reason: "Visited the pricing page"}
+  - {id: repeat_visits, field: website_visits_30d, op: gte, value: 3, points: 15,
+     reason: "{value} website visits in 30 days"}
+  - {id: hiring_marketing, field: hiring_marketing_roles, op: truthy, points: 10,
+     reason: "Hiring marketing roles: budget and attention on marketing"}
+  - {id: local_pain, field: local_marketing_pain_mentioned, op: truthy, points: 15,
+     reason: "Mentioned a local-marketing pain"}
+
+engagement_rules:
+  - {id: replied, field: replied, op: truthy, points: 25, reason: "Replied to outreach"}
+  - {id: positive_reply, field: reply_sentiment, op: eq, value: positive, points: 25,
+     reason: "The reply was positive"}
+  - {id: meeting_booked, field: meeting_booked, op: truthy, points: 35,
+     reason: "A meeting is booked"}
+  - {id: clicked_case_study, field: clicked_case_study, op: truthy, points: 15,
+     reason: "Clicked a case study"}
+
+disqualifiers:
+  - {id: competitor, field: is_competitor, op: truthy, reason: "Competes with COOL"}
+  - {id: do_not_contact, field: do_not_contact, op: truthy, reason: "Flagged do-not-contact"}
+  - {id: other_segment_agency, field: is_agency, op: truthy,
+     reason: "Is an agency, which belongs to a different segment"}
+  - {id: single_location, field: location_count, op: lt, value: 3,
+     reason: "Only {value} location(s): below the minimum for this segment"}
