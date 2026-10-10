@@ -60,3 +60,7 @@ class RunnerMismatch(RevosError):
 
 class ProposalRejected(RevosError):
     """The orchestrator refused to apply a proposal because its own checks disagreed."""
+
+
+class WebhookRejected(RevosError):
+    """An inbound webhook failed verification (bad signature or shape) and was ignored."""

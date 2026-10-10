@@ -147,7 +147,7 @@ def send_with_gate(
         return GateResult("sent", provider_id=provider_id)
 
 
-EXECUTABLE_INTERNAL = frozenset({"crm_update", "crm_note"})
+EXECUTABLE_INTERNAL = frozenset({"crm_update", "crm_note", "book_meeting", "handoff"})
 
 
 def run_approved_action(

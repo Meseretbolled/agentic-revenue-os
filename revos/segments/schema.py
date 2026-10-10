@@ -45,6 +45,7 @@ class PackMeta(Strict):
     name: str = Field(min_length=1)
     version: str = Field(min_length=1)
     description: str = ""
+    demo: bool = False          # the pack `make demo` runs, with its fictional lead
 
 
 # --- icp.yaml: lead fields, scoring rules, weights, tiers --------------------------------
@@ -306,7 +307,8 @@ class Messaging(Strict):
     @field_validator("templates")
     @classmethod
     def _required_templates(cls, value: dict[str, EmailTemplate]) -> dict[str, EmailTemplate]:
-        missing = sorted({"first_touch", "follow_up", "case_study_reply", "meeting_offer"} - set(value))
+        missing = sorted({"first_touch", "follow_up", "case_study_reply", "meeting_offer",
+                            "meeting_confirmation"} - set(value))
         if missing:
             raise ValueError("missing template(s): " + ", ".join(missing))
         return value

@@ -19,12 +19,14 @@ def run(env: AgentEnv) -> AgentOutput:
         properties[name] = item.value
         properties[f"quote:{name}"] = item.quote
         quotes[name] = item.quote
-    person = parse_person_role(result.fields["decision_maker"].quote) \
-        if "decision_maker" in result.fields else None
-    if person:                      # both parts are words from the decision-maker quote
-        properties["decision_maker_name"] = person.name
-        properties["decision_maker_role"] = person.role
-        properties["quote:decision_maker_name"] = result.fields["decision_maker"].quote
+    for field in ("decision_maker", "signer"):          # each person, with their own quote
+        if field not in result.fields:
+            continue
+        person = parse_person_role(result.fields[field].quote)
+        if person:                                      # both parts are words from that quote
+            properties[f"{field}_name"] = person.name
+            properties[f"{field}_role"] = person.role
+            properties[f"quote:{field}_name"] = result.fields[field].quote
     proposal = make("enrich", env.deal_id, env.contact_id,
                     {"properties": properties, "quotes": quotes, "source": transcript.origin},
                     sorted(result.fields), f"{len(result.fields)} call field(s) with quotes")

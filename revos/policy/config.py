@@ -47,6 +47,8 @@ DEFAULT_LEVELS: Mapping[str, AutonomyLevel] = {
     "send_io": L.AUTO,
     "social_message": L.NEEDS_APPROVAL,
     "lesson_write": L.AUTO,
+    "book_meeting": L.AUTO,
+    "handoff": L.AUTO,
     PRICE_RULE_KEY: L.AUTO_WITH_VETO,
 }
 

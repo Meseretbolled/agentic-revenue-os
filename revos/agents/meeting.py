@@ -23,6 +23,7 @@ def run(env: AgentEnv) -> AgentOutput:
         "subject": draft.subject, "body": draft.body,
         "claims": [{"text": c.text, "evidence": list(c.evidence)} for c in draft.claims],
         "case_study_id": None, "lesson_ids": [], "citations": {"lessons": []},
+        "slots": [s.start.isoformat() for s in env.slots[:3]],
         "attempts": outcome.attempts, "template": "meeting_offer", "approved_extra": [slots_text]},
         cited, "meeting times offered")
 

@@ -1,5 +1,7 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from datetime import datetime
+from typing import Any, Literal, Protocol
 
 
 @dataclass(frozen=True)
@@ -12,6 +14,14 @@ class SignatureRequest:
     test_mode: bool = True       # Dropbox Sign stays in test mode
 
 
+@dataclass(frozen=True)
+class SignatureEvent:
+    event_id: str                # stable across redeliveries of the same event
+    kind: Literal["all_signed", "other"]
+    envelope_id: str
+    occurred_at: datetime
+
+
 class ESign(Protocol):
     def send(self, request: SignatureRequest) -> str:
         """Send for signature and return the envelope id."""
@@ -20,3 +30,7 @@ class ESign(Protocol):
     def find_by_key(self, idempotency_key: str) -> str | None: ...
 
     def status(self, envelope_id: str) -> Literal["awaiting", "signed"]: ...
+
+    def parse_event(self, payload: Mapping[str, Any]) -> SignatureEvent:
+        """Verify a webhook payload and read it. Raises WebhookRejected if it does not verify."""
+        ...

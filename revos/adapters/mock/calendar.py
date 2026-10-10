@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from datetime import datetime, timedelta
+from typing import Any
 
 from revos.adapters.mock.fixtures import load
 from revos.ports.calendar import Slot
@@ -38,3 +40,16 @@ class MockCalendar:
 
     def find_invite(self, idempotency_key: str) -> str | None:
         return self._by_key.get(idempotency_key)
+
+    # --- ActionProvider ---
+    def find(self, idempotency_key: str) -> str | None:
+        return self.find_invite(idempotency_key)
+
+    def perform(self, action: Mapping[str, Any]) -> str:
+        if action["type"] != "book_meeting":
+            raise ValueError(f"calendar cannot perform {action['type']!r}")
+        if not action.get("to_email"):
+            raise ValueError("no attendee: the contact row has no email")
+        payload = action["payload"]
+        return self.create_invite(action["idempotency_key"], payload["title"],
+                                  datetime.fromisoformat(payload["start"]), (action["to_email"],))

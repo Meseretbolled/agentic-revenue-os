@@ -16,10 +16,10 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from revos.agents.broker import ToolBroker
-from revos.agents.common import check_inputs, evidence_from_fields, lead_facts
+from revos.agents.common import check_inputs, clean_fields, evidence_from_fields, lead_facts
 from revos.agents.registry import AGENTS
 from revos.agents.runner import AgentRunner
-from revos.agents.store import RunRow, RunStore
+from revos.agents.store import RunRow, RunStore, canonical_hash
 from revos.agents.types import AgentEnv, Identity
 from revos.domain.drafting import Claim, Draft
 from revos.domain.enums import Tier
@@ -31,6 +31,7 @@ from revos.domain.errors import (
     QuarantinedContent,
     SpendCapExceeded,
     ToolCallBlocked,
+    WebhookRejected,
 )
 from revos.domain.stages import DealStage, can_transition
 from revos.domain.untrusted import UntrustedText
@@ -45,6 +46,7 @@ from revos.policy.service import propose_action, release_veto_expired
 from revos.policy.settings import release_held_sends
 from revos.ports.calendar import Calendar, Slot
 from revos.ports.clock import Clock
+from revos.ports.esign import ESign
 from revos.ports.provider import ActionProvider
 from revos.ports.research import Research
 from revos.ports.transcripts import Transcripts
@@ -53,8 +55,10 @@ from revos.runtime.events import record_event
 from revos.runtime.quarantine import record_quarantine
 from revos.segments.loader import Pack
 from revos.skills.claims import deterministic_check
-from revos.skills.io import validate_io
+from revos.skills.handoff import build_handoff
+from revos.skills.io import manager_ceiling, validate_io
 from revos.skills.scoring import score_lead
+from revos.skills.slots import slot_text
 
 # A run that ends one of these ways goes to a person, with an audit entry. Order matters.
 HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
@@ -65,9 +69,14 @@ HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
 )
 INTERNAL = {"enrich", "score", "classify_reply", "suppress_contact", "cancel_scheduled_sends",
             "snooze_ooo", "reminder", "attach_case_study", "generate_io", "lesson_write"}
-SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note"}
+SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note", "book_meeting", "handoff"}
 FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
-EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role"}
+EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role", "signer_name",
+                "signer_role"}
+# What the IO is built from: a change to any of these is a new IO run.
+IO_KEYS = ("io_items", "io_start_date", "io_end_date", "discount_pct", "manager_approval",
+           "signer_name", "signer_role", "budget", "timeline", "decision_maker", "needs")
+QUALIFICATION_KEYS = ("budget", "timeline", "decision_maker", "needs", "signer_name", "signer_role")
 DEFAULT_SNOOZE_DAYS = 3        # no return date stated: look again after this long
 MAX_SNOOZE_DAYS = 14           # a stated date further out is cut back to this
 MAX_SNOOZES = 3                # after this many out-of-office replies a person looks
@@ -107,12 +116,16 @@ class Orchestrator:
                  provider: ActionProvider, identity: Identity | None = None, demo_mode: bool = True,
                  allowed_recipients: frozenset[str] = frozenset(),
                  calendar: Calendar | None = None, transcripts: Transcripts | None = None,
-                 learn_from_replies: bool = False) -> None:
+                 learn_from_replies: bool = False, esign: ESign | None = None,
+                 handoff_channel: str = "#revops",
+                 customer_success_owner: str = "customer-success") -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
         self.demo_mode, self.allowed_recipients, self.calendar = demo_mode, allowed_recipients, calendar
         self.transcripts, self.learn_from_replies = transcripts, learn_from_replies
+        self.esign, self.handoff_channel = esign, handoff_channel
+        self.customer_success_owner = customer_success_owner
         self.store = RunStore(conn)
 
     def _slots(self) -> tuple[Slot, ...]:
@@ -245,6 +258,10 @@ class Orchestrator:
                 "SELECT id, status, hold_reason, veto_until FROM actions WHERE id = %s",
                 (proposal.action_id,)).fetchone()
             approved = action["status"] == "approved"
+            if payload.get("template") == "meeting_offer" and payload.get("slots"):
+                self._merge_fields(deal_id, {"offered_slots": payload["slots"]})
+            if atype == "send_io" and approved:
+                self._merge_fields(deal_id, {"io_approved": True})
             if atype in INTERNAL and approved:
                 self._effect(atype, deal, pack, payload, run)
             elif atype in SENDABLE and action["status"] in {"approved", "pending"}:
@@ -284,11 +301,17 @@ class Orchestrator:
             return ActionRequest(atype, tier=tier, body=str(payload.get("body", "")),
                                  claim_check_passed=self._recheck_claims(deal, pack, payload))
         if atype == "send_io":
-            check = validate_io(pack, fields)
-            if not check.ok:      # recomputed from the database; the agent's word is not enough
+            check = validate_io(pack, fields, today=self.clock.now().date())
+            if not check.ok and not check.needs_manager_approval:
+                # recomputed from the database; the agent's word is not enough
                 raise ProposalRejected("the IO does not validate: " + "; ".join(check.problems))
-            return ActionRequest(atype, io_validated=check.ok,
-                                 discount_pct=float(fields.get("discount_pct", 0) or 0))
+            return ActionRequest(
+                atype, io_validated=True, discount_pct=float(fields.get("discount_pct", 0) or 0),
+                discount_approved_pct=manager_ceiling(fields) or None)
+        if atype == "book_meeting":
+            if payload.get("start") not in (fields.get("offered_slots") or []):
+                raise ProposalRejected("the time is not one we offered")
+            return ActionRequest(atype)
         if atype == "attach_case_study":
             return ActionRequest(atype, from_library=any(
                 c.id == payload.get("case_study_id") for c in pack.case_studies))
@@ -304,6 +327,11 @@ class Orchestrator:
         if payload.get("template") == "case_study_reply":
             # the subject echoes our own earlier subject; never trust text the agent supplies here
             extra = [self._last_outbound_subject(deal["id"]) or "your question"]
+        if payload.get("template") == "meeting_confirmation":
+            start = (payload.get("invite") or {}).get("start")
+            if start not in ((deal["fields"] or {}).get("offered_slots") or []):
+                return False                       # a time we never offered cannot be confirmed
+            extra = [slot_text(datetime.fromisoformat(start))]
         approved, names = check_inputs(pack, template, self.identity, deal["company_name"] or "",
                                        deal["contact_name"], study, extra)
         draft = Draft(payload["subject"], payload["body"], tuple(
@@ -353,13 +381,15 @@ class Orchestrator:
         elif atype == "attach_case_study":
             self._merge_fields(deal_id, {"proposed_case_study": payload["case_study_id"]})
         elif atype == "generate_io":
+            check = validate_io(pack, deal["fields"] or {}, today=self.clock.now().date())
             self.conn.execute(
                 "INSERT INTO documents (deal_id, kind, version, body, validation) VALUES "
-                "(%s, 'io', 1, %s, %s) ON CONFLICT (deal_id, kind, version) DO UPDATE SET "
-                "body = EXCLUDED.body, validation = EXCLUDED.validation",
-                (deal_id, payload["document"], Jsonb({"ok": payload["ok"],
-                                                       "problems": payload["problems"],
-                                                       "total": payload["total"]})))
+                "(%s, 'io', (SELECT coalesce(max(version), 0) + 1 FROM documents WHERE deal_id = %s "
+                "AND kind = 'io'), %s, %s)",
+                (deal_id, deal_id, payload["document"], Jsonb({
+                    "ok": check.ok, "problems": list(check.problems), "total": check.total,
+                    "line_items": list(check.line_items)})))
+            self._merge_fields(deal_id, {"io_validated": check.ok})      # from the rules, not the agent
         elif atype == "lesson_write":
             self._write_lesson(deal, payload)
         elif atype == "snooze_ooo":
@@ -521,6 +551,151 @@ class Orchestrator:
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
             return stop("needs_human", f"{cause_of(exc)}: {exc}")
 
+    # --- a person enters terms or approves a discount (agents cannot) ------------------------------------
+    def set_io_terms(self, deal_id: UUID, *, items: list[dict[str, Any]], start: str, end: str,
+                     discount_pct: float, actor: str) -> None:
+        self._merge_fields(deal_id, {"io_items": items, "io_start_date": start, "io_end_date": end,
+                                     "discount_pct": discount_pct})
+        write_audit(self.conn, actor, "deal.io_terms_set", deal_id,
+                    {"items": items, "start": start, "end": end, "discount_pct": discount_pct})
+
+    def approve_discount(self, deal_id: UUID, manager: str, discount_pct: float, reason: str) -> None:
+        self._merge_fields(deal_id, {"manager_approval": {
+            "approved_by": manager, "discount_pct": discount_pct, "reason": reason,
+            "at": self.clock.now().isoformat()}})
+        write_audit(self.conn, manager, "deal.discount_approved", deal_id,
+                    {"discount_pct": discount_pct, "reason": reason})
+
+    # --- the qualification gate ---------------------------------------------------------------------------
+    def run_qualification_gate(self, deal_id: UUID) -> PipelineResult:
+        """Check the pack's criteria for 'qualified'. The agent only suggests; the deal moves only
+        through transition_deal, which checks the same criteria again."""
+        deal = self._deal(deal_id)
+        fields = deal["fields"] or {}
+        step = "qualify." + canonical_hash({k: fields.get(k) for k in QUALIFICATION_KEYS})
+        try:
+            run = self.run_agent(deal_id, "qualification", step)
+            if run.status != "completed":
+                return PipelineResult("needs_human", deal["stage"], self.runner.name, run.human_reason)
+            self.apply_run(run, deal_id)
+            if run.output.get("stage_suggestion") != "qualified":
+                return PipelineResult("held", deal["stage"], self.runner.name, run.output.get("notes"),
+                                      runs=(("qualification", "completed"),))
+            if DealStage(deal["stage"]) is not DealStage.MEETING:
+                return PipelineResult("held", deal["stage"], self.runner.name,
+                                      f"criteria met, but the deal is in {deal['stage']}, not meeting",
+                                      runs=(("qualification", "completed"),))
+            self.advance(deal_id, DealStage.QUALIFIED, "exit criteria met")
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            return PipelineResult("needs_human", self._deal(deal_id)["stage"], self.runner.name,
+                                  f"{cause_of(exc)}: {exc}")
+        return PipelineResult("advanced", self._deal(deal_id)["stage"], self.runner.name,
+                              runs=(("qualification", "completed"),))
+
+    # --- the IO ---------------------------------------------------------------------------------------------
+    def handle_io(self, deal_id: UUID) -> PipelineResult:
+        """Build and validate the IO, then let the policy engine decide about sending it."""
+        deal = self._deal(deal_id)
+        if DealStage(deal["stage"]) not in {DealStage.QUALIFIED, DealStage.PROPOSAL,
+                                           DealStage.IO_APPROVAL}:
+            return PipelineResult("held", deal["stage"], self.runner.name,
+                                  f"an IO needs a qualified deal, this one is in {deal['stage']}")
+        fields = deal["fields"] or {}
+        step = "io." + canonical_hash({k: fields.get(k) for k in IO_KEYS})
+        try:
+            self.advance(deal_id, DealStage.PROPOSAL, "building the IO")
+            run = self.run_agent(deal_id, "contract_io", step)
+            if run.status != "completed":
+                return PipelineResult("needs_human", self._deal(deal_id)["stage"], self.runner.name,
+                                      run.human_reason, runs=(("contract_io", run.status),))
+            applied = self.apply_run(run, deal_id)
+            if (self._deal(deal_id)["fields"] or {}).get("io_validated") is True:
+                self.advance(deal_id, DealStage.IO_APPROVAL, "the IO validates")
+            runs = (("contract_io", "completed"),)
+            handoff = run.output.get("handoff")
+            send = next((a for a in applied if a["action_type"] == "send_io"), None)
+            if handoff or (send and send["status"] != "approved"):
+                reason = handoff or self._block_reason(send["action_id"])
+                write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
+                            {"runner": self.runner.name, "reason": reason})
+                return PipelineResult("needs_human", self._deal(deal_id)["stage"], self.runner.name,
+                                      reason, action_id=send["action_id"] if send else None, runs=runs)
+            return PipelineResult("action_proposed", self._deal(deal_id)["stage"], self.runner.name,
+                                  action_id=send["action_id"] if send else None,
+                                  decision=send["outcome"] if send else None, runs=runs)
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            return PipelineResult("needs_human", self._deal(deal_id)["stage"], self.runner.name,
+                                  f"{cause_of(exc)}: {exc}")
+
+    def _block_reason(self, action_id: UUID) -> str:
+        row = self.conn.execute("SELECT status, hold_reason FROM actions WHERE id = %s",
+                                (action_id,)).fetchone()
+        return f"blocked, a person must decide: {row[1] or row[0]}"
+
+    # --- signature: verified, idempotent, then closed won and the handoff -------------------------
+    def handle_signature_webhook(self, payload: Mapping[str, Any]) -> str:
+        """Receive a signature webhook. Returns 'queued', 'duplicate' or 'rejected'."""
+        if self.esign is None:
+            raise LookupError("no e-signature provider is configured")
+        try:
+            event = self.esign.parse_event(payload)
+        except WebhookRejected as exc:
+            write_audit(self.conn, "webhook", "webhook.rejected", None, {"why": str(exc)})
+            return "rejected"
+        created = record_event(self.conn, f"signature:{event.event_id}", "signature.event",
+                               {"envelope_id": event.envelope_id, "kind": event.kind}, self.clock)
+        return "queued" if created is not None else "duplicate"
+
+    def complete_signature(self, envelope_id: str) -> PipelineResult:
+        """Close the deal once the provider itself confirms the signature. Safe to repeat."""
+        action = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT deal_id FROM actions WHERE type = 'send_io' AND provider_id = %s",
+            (envelope_id,)).fetchone()
+        if action is None:                         # an envelope we never sent: ignore, do not guess
+            write_audit(self.conn, "orchestrator", "signature.unknown_envelope", None,
+                        {"envelope_id": envelope_id})
+            return PipelineResult("rejected", "unknown", self.runner.name, "unknown envelope")
+        deal_id = action["deal_id"]
+        deal = self._deal(deal_id)
+        if self.esign.status(envelope_id) != "signed":
+            write_audit(self.conn, "orchestrator", "signature.not_confirmed", deal_id,
+                        {"envelope_id": envelope_id})
+            return PipelineResult("held", deal["stage"], self.runner.name,
+                                  "the provider does not show it as signed")
+        if DealStage(deal["stage"]) is not DealStage.OUT_FOR_SIGNATURE:
+            return PipelineResult("completed", deal["stage"], self.runner.name, "already handled")
+        self._merge_fields(deal_id, {"signature_complete": True,
+                                     "signed_at": self.clock.now().isoformat()})
+        self.advance(deal_id, DealStage.CLOSED_WON, "signed")
+        write_audit(self.conn, "orchestrator", "deal.signed", deal_id, {"envelope_id": envelope_id})
+        return self._create_handoff(deal_id, envelope_id)
+
+    def _create_handoff(self, deal_id: UUID, envelope_id: str) -> PipelineResult:
+        deal = self._deal(deal_id)
+        pack = self._pack(deal)
+        fields = deal["fields"] or {}
+        document = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT validation FROM documents WHERE deal_id = %s AND kind = 'io' ORDER BY version "
+            "DESC LIMIT 1", (deal_id,)).fetchone()
+        lesson_ids = [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT lesson_id FROM lesson_uses WHERE deal_id = %s ORDER BY 1", (deal_id,))]
+        text = build_handoff(
+            company=deal["company_name"] or "", contact=deal["contact_name"], tier=deal["tier"],
+            total=deal["total_score"], fields=clean_fields(fields), terms=document["validation"],
+            rate_card_label=pack.rate_card.label, envelope_id=envelope_id, lesson_ids=lesson_ids)
+        self._merge_fields(deal_id, {"handoff_owner": self.customer_success_owner})
+        proposal = propose_action(
+            self.conn, self.clock, self.policy_config(pack), key=f"{deal_id}:handoff",
+            request=ActionRequest("handoff"), deal_id=deal_id,
+            payload={"channel": self.handoff_channel, "text": text, "envelope_id": envelope_id})
+        action = self.conn.execute("SELECT id, status, hold_reason, veto_until FROM actions "
+                                   "WHERE id = %s", (proposal.action_id,)).fetchone()
+        if action[1] == "approved":
+            record_event(self.conn, f"send:{deal_id}:handoff", "action.send",
+                         {"action_id": str(action[0])}, self.clock)
+        return PipelineResult("completed", self._deal(deal_id)["stage"], self.runner.name,
+                              action_id=action[0], decision=action[1])
+
     # --- a call: transcript -> deal fields -> lessons --------------------------------------------------
     def handle_transcript(self, deal_id: UUID, transcript_id: str) -> PipelineResult:
         """Turn a finished call into deal fields (each with its quote) and lessons (each with its
@@ -565,10 +740,18 @@ class Orchestrator:
         if run.status == "completed":
             self.apply_run(run, deal_id)
 
-    def record_meeting_booked(self, deal_id: UUID) -> list[lesson_loop.LessonChange]:
-        """A meeting is booked: the best outcome for every lesson used on this deal so far."""
+    def record_meeting_booked(self, deal_id: UUID, start: str | None = None
+                              ) -> list[lesson_loop.LessonChange]:
+        """A meeting is booked. Everything here happens once, however often it is called."""
+        first = self.conn.execute(
+            "UPDATE deals SET fields = fields || %s, updated_at = now() WHERE id = %s AND NOT "
+            "(fields ? 'meeting_start') RETURNING id", (Jsonb({"meeting_start": start or "booked"}),
+                                                        deal_id)).fetchone()
         changes = lesson_loop.record_outcome(self.conn, deal_id, "meeting", self.clock)
+        self.advance(deal_id, DealStage.REPLIED, "the prospect answered")
         self.advance(deal_id, DealStage.MEETING, "a meeting was booked")
+        if first:
+            write_audit(self.conn, "orchestrator", "meeting.booked", deal_id, {"start": start})
         return changes
 
     def sweep_lessons(self) -> list[lesson_loop.LessonChange]:
@@ -610,7 +793,8 @@ class Orchestrator:
                           if p["action_type"] == "classify_reply"), None)
             if run.output.get("stage_suggestion"):
                 self.advance(deal_id, DealStage(run.output["stage_suggestion"]), f"reply: {label}")
-            if label == "interested":                       # route: offer meeting times
+            already_booked = "meeting_start" in (self._deal(deal_id)["fields"] or {})
+            if label == "interested" and not already_booked:   # route: offer meeting times
                 meeting = self.run_agent(deal_id, "meeting", f"meeting:{email.message_id}",
                                          slots=self._slots())
                 runs.append(("meeting", meeting.status))
@@ -638,12 +822,27 @@ class Orchestrator:
         if result.status == "sent":
             self._record_sent_email(action_id, result.provider_id, pack)
             self._record_lesson_uses(action_id)
-        if result.status == "sent" and row["type"] == "first_touch":
-            self.advance(row["deal_id"], DealStage.OUTREACH, "first touch sent")
+        if result.status == "sent":
+            self._after_sent(row["type"], row["deal_id"], action_id, result.provider_id)
         elif result.status == "deferred" and result.run_at:
             record_event(self.conn, f"send:{action_id}:{result.run_at.isoformat()}", "action.send",
                          {"action_id": str(action_id)}, self.clock, run_at=result.run_at)
         return result
+
+    def _after_sent(self, kind: str, deal_id: UUID, action_id: UUID, provider_id: str | None) -> None:
+        if kind == "first_touch":
+            # only the first time: a repeated send job must never move a deal backwards
+            if DealStage(self._deal(deal_id)["stage"]) is DealStage.SCORED:
+                self.advance(deal_id, DealStage.OUTREACH, "first touch sent")
+        elif kind == "book_meeting":
+            payload = self.conn.execute("SELECT payload FROM actions WHERE id = %s",
+                                        (action_id,)).fetchone()[0]
+            self.record_meeting_booked(deal_id, payload.get("start"))
+        elif kind == "send_io":
+            self._merge_fields(deal_id, {"envelope_id": provider_id})
+            self.advance(deal_id, DealStage.OUT_FOR_SIGNATURE, "sent for signature (test mode)")
+        elif kind == "handoff":
+            self.advance(deal_id, DealStage.HANDOFF, "handed to customer success")
 
     def _case_study_row(self, pack: Pack, slug: str) -> int:
         study = next(c for c in pack.case_studies if c.id == slug)
@@ -714,7 +913,11 @@ class Orchestrator:
         def lessons_sweep(_conn: psycopg.Connection, job: Any) -> None:
             self.sweep_lessons()
 
-        return {"lead.created": lead_created, "action.send": send, "lessons.sweep": lessons_sweep,
+        def signature_event(_conn: psycopg.Connection, job: Any) -> None:
+            self.complete_signature(job.payload["envelope_id"])
+
+        return {"signature.event": signature_event, "lead.created": lead_created,
+                "action.send": send, "lessons.sweep": lessons_sweep,
                 "action.veto_expired": veto_expired, "lead.snooze_ended": snooze_ended,
                 "queue.release_held": release_held}
 

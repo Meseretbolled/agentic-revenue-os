@@ -48,6 +48,8 @@ TABLE = [
      OUT.AUTO, OUT.AUTO),
     ("social message", req("social_message"), OUT.DRAFT_ONLY, OUT.DRAFT_ONLY),
     ("lesson write", req("lesson_write"), OUT.AUTO, OUT.AUTO),
+    ("book meeting", req("book_meeting"), OUT.AUTO, OUT.AUTO),
+    ("handoff", req("handoff"), OUT.AUTO, OUT.AUTO),
 ]
 
 

@@ -81,3 +81,14 @@ templates:
 
       {{ unsubscribe_line }}
       {{ postal_address }}
+  meeting_confirmation:
+    subject: "Confirmed: {{ slot_text }}"
+    body: |
+      Hi {{ first_name }},
+
+      Confirmed for {{ slot_text }}. A calendar invite is attached.
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}

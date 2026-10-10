@@ -6,5 +6,6 @@ KNOWN_ACTION_KEYS = frozenset({
     "follow_up", "reminder", "classify_reply", "snooze_ooo",
     "suppress_contact", "cancel_scheduled_sends",
     "attach_case_study", "generate_io", "send_io", "social_message", "lesson_write",
+    "book_meeting", "handoff",
     "price_message",
 })

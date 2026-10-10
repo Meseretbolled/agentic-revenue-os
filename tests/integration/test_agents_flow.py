@@ -362,6 +362,8 @@ def test_meeting_with_no_free_slots_goes_to_a_person(conn, ro_conn, pack, clock)
 
 def _io_fields(**extra):
     return json.dumps({"budget": "50k", "timeline": "Q1", "decision_maker": "Dana", "needs": "local",
+                       "signer_name": "Priya Nair", "signer_role": "Head of Finance",
+                       "io_start_date": "2026-11-02", "io_end_date": "2027-02-01",
                        "io_items": [{"id": "multi_location", "quantity": 120},
                                     {"id": "creative_automation", "quantity": 3}], **extra})
 
@@ -379,12 +381,26 @@ def test_contract_io_builds_a_sample_labelled_document_and_sends_it_in_test_mode
     assert request.test_mode is True and request.signer_email == "sam.lee@brightside-optical.example"
 
 
-def test_an_io_with_a_discount_over_the_maximum_never_reaches_signature(conn, ro_conn, pack, clock):
+def test_an_io_with_a_discount_over_the_maximum_is_blocked_by_the_policy_engine(conn, ro_conn, pack, clock):
     rig = make_rig(conn, ro_conn, pack, clock, fields=_io_fields(discount_pct=40))
     run = rig.orch.run_agent(rig.deal_id, "contract_io", "io.1")
-    assert run.status == "needs_human" and "above the maximum of 15" in run.human_reason
-    assert conn.execute("SELECT count(*) FROM actions WHERE type = 'send_io'").fetchone()[0] == 0
+    assert run.status == "completed" and [p["action_type"] for p in run.proposals] == [
+        "generate_io", "send_io"]
+    rig.orch.apply_run(run, rig.deal_id)
+    status, why = conn.execute("SELECT status, hold_reason FROM actions WHERE type = 'send_io'").fetchone()
+    assert status == "cancelled" and "discount_over_maximum" in why
     assert rig.world.esign.requests == []
+    doc = conn.execute("SELECT validation FROM documents").fetchone()[0]
+    assert doc["ok"] is False and "needs a manager's approval" in doc["problems"][0]
+
+
+def test_an_io_that_fails_validation_is_stored_for_a_person_and_never_proposed_for_signature(
+        conn, ro_conn, pack, clock):
+    rig = make_rig(conn, ro_conn, pack, clock, fields=_io_fields(signer_name=""))
+    run = rig.orch.run_agent(rig.deal_id, "contract_io", "io.1")
+    assert [p["action_type"] for p in run.proposals] == ["generate_io"]
+    assert "missing deal field: signer_name" in run.output["handoff"]
+    assert conn.execute("SELECT count(*) FROM actions WHERE type = 'send_io'").fetchone()[0] == 0
 
 
 def test_tracking_flags_only_stalled_deals(conn, ro_conn, pack, clock):

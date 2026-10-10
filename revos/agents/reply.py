@@ -1,10 +1,13 @@
+from datetime import datetime
+
 from revos.agents.common import first_name, make, match_tags
 from revos.agents.types import AgentEnv, AgentOutput
 from revos.domain.errors import QuarantinedContent
 from revos.domain.stages import DealStage
 from revos.skills.dates import return_date
-from revos.skills.drafting import render_case_study_reply
+from revos.skills.drafting import render_case_study_reply, render_fixed
 from revos.skills.inbound import triage_reply
+from revos.skills.slots import match_slot, slot_text
 
 _STAGE_FOR = {"unsubscribe": DealStage.DO_NOT_CONTACT, "not_interested": DealStage.CLOSED_LOST,
               "out_of_office": None}
@@ -67,6 +70,30 @@ def run(env: AgentEnv) -> AgentOutput:
                     "in_reply_to": message_id, "lesson_ids": [], "approved_extra": [],
                     "tier": deal.get("tier")}, [study.id],
                      f"answer the objection with {study.customer}'s stored facts")]
+    elif label == "accept_slot":
+        deal = env.tools.call("crm.get_deal", {"deal_id": str(d)})
+        offered = [datetime.fromisoformat(s) for s in deal["fields"].get("offered_slots", [])]
+        chosen = match_slot(reply, offered)
+        if chosen is None:
+            handoff = "accept_slot: the reply does not match one of the times we offered"
+        else:
+            contact = env.tools.call("crm.get_contact", {"contact_id": str(c)})
+            text = slot_text(chosen)
+            draft = render_fixed(env.pack, "meeting_confirmation", {
+                "first_name": first_name(contact.get("full_name")), "slot_text": text,
+                "sender_name": env.identity.sender_name,
+                "unsubscribe_line": env.identity.unsubscribe_line,
+                "postal_address": env.identity.postal_address})
+            invite = {"start": chosen.isoformat(), "minutes": 30,
+                      "summary": f"Intro call with {contact.get('full_name') or 'you'}"}
+            proposals += [
+                make("book_meeting", d, c, {"start": chosen.isoformat(), "title": invite["summary"],
+                                            "message_id": message_id}, [], "they accepted an offered time"),
+                make("follow_up", d, c, {
+                    "subject": draft.subject, "body": draft.body, "claims": [],
+                    "template": "meeting_confirmation", "invite": invite, "in_reply_to": message_id,
+                    "case_study_id": None, "lesson_ids": [], "approved_extra": [text],
+                    "tier": deal.get("tier")}, [], "confirm the time, with the invite attached")]
     elif label == "question":
         proposals.append(note(f"Prospect asked a question (message {message_id}); a person should answer."))
         handoff = "question: a person should answer"

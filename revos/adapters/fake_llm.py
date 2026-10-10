@@ -32,6 +32,8 @@ _REPLY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
                          "cheaper")),
     ("not_interested", ("not interested", "no thanks", "no thank you", "not a fit",
                         "we're all set")),
+    ("accept_slot", ("works for me", "that works", "i can do", "let's do", "lets do", "i'll take",
+                     "book me")),
     ("interested", ("interested", "sounds good", "let's talk", "lets talk", "send me more",
                     "book a call", "happy to chat")),
     ("question", ("?",)),
@@ -40,7 +42,8 @@ _REPLY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
 _CALL_RULES: dict[str, tuple[str, ...]] = {
     "budget": ("budget",),
     "timeline": ("timeline", "by q", "weeks", "months", "launch", "deadline"),
-    "decision_maker": ("decision maker", "decision-maker", "sign off", "approve this"),
+    "decision_maker": ("decision maker", "decision-maker", "approve this"),
+    "signer": ("will sign", "is the signer", "signs the", "signatory"),
     "needs": ("we need", "looking for", "need to", "challenge"),
     "objections": ("concern", "worried", "too expensive", "not sure"),
 }
@@ -50,6 +53,7 @@ _LESSON_TAGS: dict[str, tuple[str, ...]] = {
     "pricing": ("price", "pricing", "cost", "expensive", "budget"),
     "compliance": ("compliance", "brand"),
     "timing": ("timeline", "launch", "weeks", "quarter"),
+    "attribution": ("attribution", "which campaigns", "cannot tell", "measure"),
     "objection": ("concern", "worried", "not sure"),
 }
 

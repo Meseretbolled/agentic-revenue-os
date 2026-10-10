@@ -29,6 +29,7 @@ class MockWorld:
         return ActionRouter({
             "first_touch": self.mailer, "follow_up": self.mailer,
             "crm_update": self.crm, "crm_note": self.crm, "send_io": self.esign,
+            "book_meeting": self.calendar, "handoff": self.chat,
         })
 
 

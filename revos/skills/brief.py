@@ -24,6 +24,9 @@ def build_brief(*, company: str, contact: str | None, stage: str, tier: str | No
     if fields.get("decision_maker_name"):
         who += f"; decision maker {fields['decision_maker_name']}" + (
             f" ({fields['decision_maker_role']})" if fields.get("decision_maker_role") else "")
+    if fields.get("signer_name"):
+        who += f"; signer {fields['signer_name']}" + (
+            f" ({fields['signer_role']})" if fields.get("signer_role") else "")
     score = f"tier {tier} ({total}/100)" if tier else "not scored"
     known = [f"{name}: {fields[name]}" for name in QUALIFICATION if fields.get(name)]
     facts = "; ".join(f"[{i.id}] {i.text}" for i in evidence.items.values()) or "none recorded"

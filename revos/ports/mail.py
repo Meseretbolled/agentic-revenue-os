@@ -1,6 +1,6 @@
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 
 
@@ -10,12 +10,35 @@ def message_id_for(idempotency_key: str) -> str:
 
 
 @dataclass(frozen=True)
+class Attachment:
+    filename: str
+    content_type: str
+    content: str
+
+
+@dataclass(frozen=True)
 class OutboundEmail:
     idempotency_key: str
     to: str
     subject: str
     body: str
     in_reply_to: str | None = None
+    attachments: tuple[Attachment, ...] = ()
+
+
+def build_ics(uid: str, start: datetime, minutes: int, summary: str, attendee: str,
+              organizer: str = "meetings@revos.example") -> Attachment:
+    """A calendar invite. The attendee is the address the email is going to, supplied by the
+    caller from the contact row, never taken from anything a prospect wrote."""
+    def stamp(moment: datetime) -> str:
+        return moment.strftime("%Y%m%dT%H%M%SZ")
+
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//revos//meeting//EN", "METHOD:REQUEST",
+             "BEGIN:VEVENT", f"UID:{uid}@revos.example", f"DTSTAMP:{stamp(start)}",
+             f"DTSTART:{stamp(start)}", f"DTEND:{stamp(start + timedelta(minutes=minutes))}",
+             f"SUMMARY:{summary}", f"ORGANIZER:mailto:{organizer}",
+             f"ATTENDEE;RSVP=TRUE:mailto:{attendee}", "END:VEVENT", "END:VCALENDAR"]
+    return Attachment("invite.ics", "text/calendar; method=REQUEST", "\r\n".join(lines) + "\r\n")
 
 
 @dataclass(frozen=True)

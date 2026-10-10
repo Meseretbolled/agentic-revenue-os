@@ -1,4 +1,4 @@
-.PHONY: setup lint test verify db-up db-down
+.PHONY: setup lint test verify db-up db-down demo
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -23,3 +23,7 @@ db-up:
 
 db-down:
 	docker compose down
+
+# One fictional lead from arrival to handoff, offline and narrated (uses its own database).
+demo: db-up
+	$(VENV)/bin/revos demo

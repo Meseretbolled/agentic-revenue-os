@@ -1,6 +1,7 @@
 id: franchise_brands
 name: Brands and franchise
 version: "0.1.0"
+demo: true
 description: >
   Brands with many locations or franchisees (and performance-minded brands) that need local
   campaigns at scale. Product focus: Franchise and Multi-location, DCO and Creative Automation,

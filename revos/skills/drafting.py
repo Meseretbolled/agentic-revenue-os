@@ -65,15 +65,19 @@ def draft_with_checks(
         current = replace(request, feedback=tuple(i.message for i in result.issues))
 
 
-def render_case_study_reply(pack, study, context, original_subject: str) -> Draft:
-    """The answer to an objection: the pack's template filled with one case study's STORED facts.
-    No model writes any word of it, and it makes no claims about the prospect."""
-    template = pack.messaging.templates["case_study_reply"]
+def render_fixed(pack, template_name: str, context) -> Draft:
+    """An email made only of a pack template and values we supply. No model writes any of it."""
+    template = pack.messaging.templates[template_name]
     env = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)
-    values = {**context, "case_study": study, "original_subject": original_subject}
     try:
-        subject = env.from_string(template.subject).render(values)
-        body = env.from_string(template.body).render(values)
+        subject = env.from_string(template.subject).render(context)
+        body = env.from_string(template.body).render(context)
     except jinja2.UndefinedError as exc:
-        raise LLMError(f"cannot render the reply: {exc}") from exc
+        raise LLMError(f"cannot render {template_name}: {exc}") from exc
     return Draft(" ".join(subject.split()), body.strip(), ())
+
+
+def render_case_study_reply(pack, study, context, original_subject: str) -> Draft:
+    """The answer to an objection: the pack's template filled with one case study's STORED facts."""
+    return render_fixed(pack, "case_study_reply",
+                        {**context, "case_study": study, "original_subject": original_subject})

@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol
 from revos.domain.drafting import Claim, Draft, Evidence
 from revos.domain.untrusted import UntrustedText
 
-ReplyLabel = Literal["interested", "not_interested", "question", "price_objection",
+ReplyLabel = Literal["interested", "accept_slot", "not_interested", "question", "price_objection",
                      "unsubscribe", "referral", "out_of_office"]
 REPLY_LABELS: tuple[str, ...] = ReplyLabel.__args__  # type: ignore[attr-defined]
 

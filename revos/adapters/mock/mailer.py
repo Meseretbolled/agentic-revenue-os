@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from revos.adapters.mock.fixtures import load
-from revos.ports.mail import InboundEmail, OutboundEmail, message_id_for
+from revos.ports.mail import InboundEmail, OutboundEmail, build_ics, message_id_for
 
 _MAIL_TYPES = {"first_touch", "follow_up"}
 
@@ -43,8 +43,14 @@ class MockMailer:
         if not to:
             raise ValueError("no recipient: the contact row has no email")
         payload = action["payload"]
+        invite = payload.get("invite")
+        attachments = ()
+        if invite:                       # the attendee is the contact-row address, nothing else
+            attachments = (build_ics(action["idempotency_key"],
+                                     datetime.fromisoformat(invite["start"]),
+                                     int(invite.get("minutes", 30)), invite["summary"], to),)
         return self.send(OutboundEmail(action["idempotency_key"], to, payload["subject"],
-                                       payload["body"], payload.get("in_reply_to")))
+                                       payload["body"], payload.get("in_reply_to"), attachments))
 
 
 class MockInbox:

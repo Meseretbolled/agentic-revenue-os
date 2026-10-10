@@ -42,6 +42,13 @@ def kill_switch(state: str = typer.Argument(..., help="on or off")) -> None:
 
 
 
+@app.command("demo")
+def demo() -> None:
+    """Run one fictional lead from arrival to handoff, offline, narrated."""
+    from revos.demo import demo_main
+    demo_main()
+
+
 @app.callback()
 def root() -> None:
     """Agentic Revenue OS command line."""

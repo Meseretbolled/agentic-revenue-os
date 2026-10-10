@@ -1,4 +1,6 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -24,3 +26,13 @@ class MockChat:
 
     def find_by_key(self, idempotency_key: str) -> str | None:
         return self._by_key.get(idempotency_key)
+
+    # --- ActionProvider ---
+    def find(self, idempotency_key: str) -> str | None:
+        return self.find_by_key(idempotency_key)
+
+    def perform(self, action: Mapping[str, Any]) -> str:
+        if action["type"] != "handoff":
+            raise ValueError(f"chat cannot perform {action['type']!r}")
+        payload = action["payload"]
+        return self.post(payload["channel"], payload["text"], action["idempotency_key"])
