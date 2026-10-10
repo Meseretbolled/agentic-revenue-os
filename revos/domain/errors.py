@@ -27,3 +27,20 @@ class PermanentError(RevosError):
 
 class ActionNotApproved(RevosError):
     """The database holds no approving decision for this action, so it must not run."""
+
+
+class LLMError(RevosError):
+    """The model call failed or returned something unusable. Callers fail closed."""
+
+
+class SpendCapExceeded(LLMError):
+    """The LLM spend cap would be exceeded, so the call was not made."""
+
+
+class QuarantinedContent(RevosError):
+    """Flagged inbound text was about to be given to a model. It goes to a person instead."""
+
+    def __init__(self, findings: tuple) -> None:
+        self.findings = findings
+        super().__init__("inbound content is quarantined: "
+                         + ", ".join(sorted({f.rule_id for f in findings})))
