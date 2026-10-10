@@ -19,3 +19,11 @@ class ExitCriteriaNotMet(RevosError):
 
 class StaleDeal(RevosError):
     """The deal changed since the caller read it (optimistic lock)."""
+
+
+class PermanentError(RevosError):
+    """A job failure that retrying cannot fix: skip retries, go to the dead-letter table."""
+
+
+class ActionNotApproved(RevosError):
+    """The database holds no approving decision for this action, so it must not run."""

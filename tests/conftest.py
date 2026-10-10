@@ -3,6 +3,7 @@ import os
 import psycopg
 import pytest
 
+from revos.adapters.clock import FakeClock
 from revos.db import migrate
 
 PORT = os.environ.get("POSTGRES_PORT", "5434")
@@ -36,4 +37,16 @@ def conn(test_db_url: str):
             "AND tablename NOT IN ('schema_migrations', 'settings')")]
         c.execute("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")
         c.execute("INSERT INTO segments (id, pack_version) VALUES ('test_seg', '1')")
+        yield c
+
+
+@pytest.fixture
+def clock() -> FakeClock:
+    return FakeClock()
+
+
+@pytest.fixture
+def conn2(test_db_url: str):
+    """A second connection, to model a second worker or a restarted process."""
+    with psycopg.connect(test_db_url, autocommit=True) as c:
         yield c
