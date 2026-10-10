@@ -37,6 +37,8 @@ def conn(test_db_url: str):
             "AND tablename NOT IN ('schema_migrations', 'settings')")]
         c.execute("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")
         c.execute("INSERT INTO segments (id, pack_version) VALUES ('test_seg', '1')")
+        c.execute("UPDATE settings SET value = 'false' WHERE key = 'kill_switch'")
+        c.execute("UPDATE settings SET value = '\"autonomous\"' WHERE key = 'autonomy_mode'")
         yield c
 
 

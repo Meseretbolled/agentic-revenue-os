@@ -33,3 +33,17 @@ class Decision(StrEnum):
     APPROVED = "approved"
     VETOED = "vetoed"
     REJECTED = "rejected"
+
+
+class AutonomyMode(StrEnum):
+    AUTONOMOUS = "autonomous"
+    APPROVAL = "approval"       # brief-compliant: every auto_with_veto becomes needs_approval
+
+
+class Outcome(StrEnum):
+    AUTO = "auto"
+    AUTO_WITH_VETO = "auto_with_veto"
+    NEEDS_APPROVAL = "needs_approval"
+    DRAFT_ONLY = "draft_only"   # never sent by the system (social messages)
+    BLOCKED = "blocked"         # hard block: goes to a person, never sends
+    DENIED = "denied"           # not on the allowlist
