@@ -49,5 +49,5 @@ def test_execute_action_is_used_only_by_the_gate_and_its_own_module() -> None:
 
 
 def test_only_the_outbox_marks_an_action_sent() -> None:
-    writers = {name for name, text in sources() if re.search(r"status\s*=\s*'sent'", text)}
+    writers = {name for name, text in sources() if re.search(r"\bSET\b[^\"]*status\s*=\s*'sent'", text)}
     assert writers == {OUTBOX}

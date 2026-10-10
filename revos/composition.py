@@ -46,3 +46,16 @@ def build_runner(conn: psycopg.Connection | None = None):
         return SdkRunner(SpendLedger(conn, config.max_spend_usd, config.reserve_per_call_usd),
                          ClaudeLLM(conn, config), config)
     raise ValueError(f"LLM_MODE must be 'fake' or 'live', got '{mode}'")
+
+
+def build_crm():
+    """The CRM adapter: HubSpot when HUBSPOT_TOKEN is set, otherwise the mock."""
+    from revos.adapters.hubspot.client import DEFAULT_BASE_URL, HubSpotClient
+    from revos.adapters.hubspot.crm import HubSpotCRM
+    from revos.adapters.mock.crm import MockCRM
+
+    token = os.environ.get("HUBSPOT_TOKEN", "").strip()
+    if not token:
+        return MockCRM()
+    base = os.environ.get("HUBSPOT_BASE_URL", "").strip() or DEFAULT_BASE_URL
+    return HubSpotCRM(HubSpotClient(token, base))

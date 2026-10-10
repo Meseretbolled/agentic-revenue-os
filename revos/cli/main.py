@@ -49,6 +49,80 @@ def demo() -> None:
     demo_main()
 
 
+@app.command("doctor")
+def doctor() -> None:
+    """One status per service: REAL OK, REAL FAILED (with a reason category) or MOCK. No values."""
+    from revos.doctor import FAILED, run_checks
+    from revos.env import load_env_file
+    load_env_file()
+    checks = run_checks()
+    for check in checks:
+        typer.echo(check.line())
+    if any(c.status == FAILED for c in checks):
+        raise typer.Exit(1)
+
+
+def _hubspot_client():
+    import os
+
+    from revos.adapters.hubspot.client import DEFAULT_BASE_URL, HubSpotClient
+    from revos.env import load_env_file
+    load_env_file()
+    token = os.environ.get("HUBSPOT_TOKEN", "").strip()
+    if not token:
+        typer.echo("HUBSPOT_TOKEN is not set: nothing to do (HubSpot stays on the mock)", err=True)
+        raise typer.Exit(2)
+    return HubSpotClient(token, os.environ.get("HUBSPOT_BASE_URL", "").strip() or DEFAULT_BASE_URL)
+
+
+@app.command("hubspot-setup")
+def hubspot_setup() -> None:
+    """Create the custom properties revos needs in HubSpot. Safe to run again: it changes nothing."""
+    from revos.adapters.hubspot.client import HubSpotError, HubSpotUnavailable
+    from revos.adapters.hubspot.schema import ensure_properties
+    try:
+        report = ensure_properties(_hubspot_client())
+    except (HubSpotError, HubSpotUnavailable) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"created {len(report.created)} propert(ies), {len(report.existing)} already there"
+               + (f", property group added for {report.groups_created}" if report.groups_created else ""))
+    if report.stages_missing:
+        typer.echo("deal stages our map uses that this pipeline lacks: " + ", ".join(report.stages_missing))
+
+
+@app.command("reset-demo")
+def reset_demo_command(
+    hubspot: bool = typer.Option(False, "--hubspot", help="delete the HubSpot demo records"),
+    yes: bool = typer.Option(False, "--yes", help="do not ask first"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="only count"),
+) -> None:
+    """Delete ONLY records flagged revos_demo=true. Local reset arrives with the dashboard step."""
+    if not hubspot:
+        typer.echo("nothing selected: use --hubspot (the local reset comes in a later step)", err=True)
+        raise typer.Exit(2)
+    from revos.adapters.hubspot.client import HubSpotError, HubSpotUnavailable
+    from revos.adapters.hubspot.reset import find_demo_records, reset_demo
+    from revos.db import connect
+    client = _hubspot_client()
+    try:
+        found = find_demo_records(client)
+        total = sum(len(v) for v in found.values())
+        typer.echo("flagged revos_demo=true: " + ", ".join(f"{len(v)} {k}" for k, v in found.items()))
+        if dry_run or not total:
+            return
+        if not yes and not typer.confirm(f"delete these {total} record(s) from HubSpot?"):
+            raise typer.Exit(1)
+        with connect() as conn:
+            notes = [r[0] for r in conn.execute("SELECT provider_id FROM actions WHERE type = 'crm_note' "
+                                                "AND status = 'sent' AND provider_id IS NOT NULL")]
+        counts = reset_demo(client, extra_note_ids=notes)
+    except (HubSpotError, HubSpotUnavailable) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo("deleted: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
+
+
 @app.callback()
 def root() -> None:
     """Agentic Revenue OS command line."""

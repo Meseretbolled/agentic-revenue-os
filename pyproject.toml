@@ -36,7 +36,11 @@ revos = ["adapters/mock/fixtures/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["db: needs the Postgres container (docker compose up -d db)"]
+markers = [
+    "db: needs the Postgres container (docker compose up -d db)",
+    "live: talks to a real service with real credentials; skipped unless run with -m live",
+]
+addopts = "-m 'not live'"
 
 [tool.ruff]
 line-length = 110

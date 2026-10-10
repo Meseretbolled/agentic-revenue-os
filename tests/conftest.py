@@ -6,6 +6,9 @@ import pytest
 from revos.adapters.clock import FakeClock
 from revos.db import migrate
 
+# The tests never read the developer's .env. Only tests/live does, and only with `-m live`.
+os.environ["REVOS_NO_DOTENV"] = "1"
+
 PORT = os.environ.get("POSTGRES_PORT", "5434")
 BASE = f"postgresql://revos:revos@localhost:{PORT}"
 TEST_DB = "revos_test"
