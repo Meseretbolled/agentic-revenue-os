@@ -31,6 +31,9 @@ revos = "revos.cli.main:app"
 [tool.setuptools.packages.find]
 include = ["revos*"]
 
+[tool.setuptools.package-data]
+revos = ["adapters/mock/fixtures/*.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["db: needs the Postgres container (docker compose up -d db)"]

@@ -48,8 +48,11 @@ def execute_action(
     """
     with conn.transaction():
         cur = conn.cursor(row_factory=dict_row)
+        # to_email comes from the contact row, never from the payload.
         action = cur.execute(
-            "SELECT * FROM actions WHERE id = %s FOR UPDATE", (action_id,)
+            "SELECT a.*, c.email AS to_email FROM actions a "
+            "LEFT JOIN contacts c ON c.id = a.contact_id WHERE a.id = %s FOR UPDATE OF a",
+            (action_id,),
         ).fetchone()
         if action is None:
             raise LookupError(f"no action {action_id}")

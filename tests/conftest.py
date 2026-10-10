@@ -75,3 +75,11 @@ def pack_copy(tmp_path: Path) -> Path:
     target = tmp_path / PACK_ID
     shutil.copytree(PACKS_DIR / PACK_ID, target)
     return target
+
+
+@pytest.fixture
+def ro_conn(test_db_url: str):
+    """Read-only connection, the kind agent tools are given."""
+    from revos.db import connect_read_only
+    with connect_read_only(test_db_url) as c:
+        yield c

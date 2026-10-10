@@ -22,6 +22,16 @@ def connect(url: str | None = None) -> psycopg.Connection:
     return psycopg.connect(url or database_url())
 
 
+def connect_read_only(url: str | None = None) -> psycopg.Connection:
+    """A connection whose transactions are read-only (used by agent tools).
+
+    This stops accidental writes. It is not a privilege boundary: a SELECT-only database role
+    would be the stronger version.
+    """
+    return psycopg.connect(url or database_url(), autocommit=True,
+                           options="-c default_transaction_read_only=on")
+
+
 def migrate(conn: psycopg.Connection) -> list[str]:
     """Apply any unapplied migrations in filename order. Safe to re-run."""
     applied_now: list[str] = []

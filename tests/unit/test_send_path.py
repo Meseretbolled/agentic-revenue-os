@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2] / "revos"
 GATE = "policy/gate.py"
 OUTBOX = "runtime/outbox.py"
+ROUTER = "adapters/router.py"     # a provider that forwards to other providers; only the outbox calls it
 
 
 def sources():
@@ -24,7 +25,13 @@ def test_provider_perform_is_called_only_by_the_outbox() -> None:
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                     and node.func.attr == "perform":
                 callers.add(name)
-    assert callers == {OUTBOX}
+    assert callers == {OUTBOX, ROUTER}
+
+
+def test_the_router_is_wired_only_by_composition_code() -> None:
+    users = {name for name, text in sources()
+             if _mentions(ast.parse(text), "ActionRouter") and name != ROUTER}
+    assert users <= {"adapters/mock/__init__.py", "composition.py"}
 
 
 def _mentions(tree: ast.AST, symbol: str) -> bool:

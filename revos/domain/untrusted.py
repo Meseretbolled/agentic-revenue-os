@@ -28,11 +28,14 @@ class UntrustedText:
     boundary: str
 
     @classmethod
-    def wrap(cls, kind: Kind, origin: str, content: str, *, is_html: bool = False) -> "UntrustedText":
+    def wrap(cls, kind: Kind, origin: str, content: str, *, is_html: bool = False,
+             max_chars: int | None = None) -> "UntrustedText":
         if is_html:
             visible, hidden = extract_html(content)
         else:
             visible, hidden = content.strip(), ()
+        if max_chars is not None:
+            visible = visible[:max_chars]       # cut before hashing, so the fence stays intact
         findings = scan(visible)
         for piece in hidden:
             findings += scan(piece, hidden=True)

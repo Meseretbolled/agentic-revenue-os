@@ -1,0 +1,4 @@
+records:
+  - {kind: companies, key: seed:company:brightside, properties: {name: Brightside Optical Group, domain: brightside-optical.example}}
+  - {kind: contacts, key: seed:contact:sam, properties: {firstname: Sam, lastname: Lee, email: sam.lee@brightside-optical.example}}
+  - {kind: deals, key: seed:deal:brightside, properties: {dealname: Brightside Optical Group, dealstage: scored}}
