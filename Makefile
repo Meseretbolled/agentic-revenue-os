@@ -12,14 +12,14 @@ setup:
 lint:
 	$(PY) -m ruff check .
 
-test:
+test: db-up
 	$(PY) -m pytest -q
 
 verify: lint test
 
 # Port comes from POSTGRES_PORT (default 5434, set in docker-compose.yml and .env).
 db-up:
-	docker compose up -d db
+	docker compose up -d --wait db
 
 db-down:
 	docker compose down
