@@ -4,7 +4,7 @@ the model; a person sees it instead."""
 from dataclasses import dataclass
 from typing import Literal
 
-from revos.domain.errors import LLMError, QuarantinedContent
+from revos.domain.errors import LLMError, QuarantinedContent, SpendCapExceeded
 from revos.domain.injection import Finding
 from revos.domain.untrusted import UntrustedText
 from revos.ports.llm import LLM, ExtractedField, ReplyClassification
@@ -30,6 +30,8 @@ def triage_reply(llm: LLM, reply: UntrustedText) -> Triage:
                       "reply contains text that tries to instruct the system")
     try:
         result = llm.classify_reply(reply)
+    except SpendCapExceeded:
+        raise                  # a typed stop: the run ends needs_human with its own reason code
     except LLMError as exc:
         return Triage("human", None, (), f"classifier unavailable: {exc}")
     if result.confidence < CONFIDENCE_FLOOR:

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from revos.domain.drafting import Claim, Draft, Evidence, Issue
-from revos.domain.errors import SpendCapExceeded
+from revos.domain.errors import LLMError, SpendCapExceeded
 from revos.ports.llm import ClaimVerdict
 
 _MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
@@ -115,6 +115,7 @@ class CheckResult:
     passed: bool
     issues: tuple[Issue, ...]
     verifier: str            # ok | missing | error | over_budget | skipped
+    error: LLMError | None = None      # the typed error, when the verifier raised one
 
 
 def _spans(text: str, claim: Claim) -> list[tuple[int, int]]:
@@ -196,10 +197,11 @@ def check_draft(
         verdicts = list(verifier.verify_claims(draft, evidence))
     except SpendCapExceeded as exc:
         return CheckResult(False, (Issue("verifier_over_budget", f"verifier blocked by the spend "
-                                         f"cap: {exc}"),), "over_budget")
+                                         f"cap: {exc}"),), "over_budget", exc)
     except Exception as exc:  # noqa: BLE001 - any verifier failure fails closed
         return CheckResult(False, (Issue("verifier_error", f"verifier failed: "
-                                         f"{type(exc).__name__}: {exc}"),), "error")
+                                         f"{type(exc).__name__}: {exc}"),), "error",
+                           exc if isinstance(exc, LLMError) else None)
 
     by_index = {v.claim_index: v for v in verdicts}
     problems = []

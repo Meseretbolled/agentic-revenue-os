@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from revos.segments.schema import (
     CaseStudy,
     CaseStudyLibrary,
+    EnrichmentConfig,
     Messaging,
     PackMeta,
     PolicyPack,
@@ -19,8 +20,6 @@ from revos.segments.schema import (
     check_template,
 )
 
-FILES = ("pack.yaml", "icp.yaml", "stages.yaml", "policy.yaml", "messaging.yaml",
-         "case_studies.yaml", "rate_card.yaml")
 # template file -> variables it must use
 TEMPLATES = {
     "templates/io.md.j2": ("advertiser_name", "line_items", "total", "rate_card_label"),
@@ -44,6 +43,7 @@ class Pack:
     directory: Path
     meta: PackMeta
     scoring: ScoringConfig
+    enrichment: EnrichmentConfig
     stages: StagesConfig
     policy: PolicyPack
     messaging: Messaging
@@ -102,6 +102,13 @@ def load_pack(directory: Path | str) -> Pack:
                           f"'{meta.id}' must match the folder name '{directory.name}'")])
 
     scoring = _validate(ScoringConfig, _read_yaml(directory, "icp.yaml"), directory, "icp.yaml")
+    enrichment = _validate(EnrichmentConfig, _read_yaml(directory, "enrichment.yaml"), directory,
+                           "enrichment.yaml")
+    unknown = [(_label(directory, "enrichment.yaml"), f"extractors.{i}.field",
+                f"'{e.field}' is not declared in icp.yaml lead_fields")
+               for i, e in enumerate(enrichment.extractors) if e.field not in scoring.lead_fields]
+    if unknown:
+        raise PackError(unknown)
     stages = _validate(StagesConfig, _read_yaml(directory, "stages.yaml"), directory, "stages.yaml")
     policy = _validate(PolicyPack, _read_yaml(directory, "policy.yaml"), directory, "policy.yaml")
     messaging = _validate(Messaging, _read_yaml(directory, "messaging.yaml"), directory,
@@ -121,7 +128,7 @@ def load_pack(directory: Path | str) -> Pack:
         except ValueError as exc:
             raise PackError([(_label(directory, name), "", str(exc))]) from exc
 
-    return Pack(directory, meta, scoring, stages, policy, messaging, tuple(library.case_studies),
+    return Pack(directory, meta, scoring, enrichment, stages, policy, messaging, tuple(library.case_studies),
                 rate_card, templates)
 
 

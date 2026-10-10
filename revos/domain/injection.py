@@ -110,6 +110,8 @@ _HIDING_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden|"
                            r"(?:left|top)\s*:\s*-\d{4,}|height\s*:\s*0(?:px)?\s*;[^\"]*overflow\s*:\s*hidden",
                            re.IGNORECASE)
 _TEXT_ATTRS = ("alt", "title", "aria-label", "placeholder", "content")
+_BLOCKS = {"p", "div", "br", "li", "ul", "ol", "tr", "section", "article", "header", "footer",
+           "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "table"}
 
 
 class _Extractor(HTMLParser):
@@ -131,16 +133,22 @@ class _Extractor(HTMLParser):
             "hidden" in a or a.get("aria-hidden", "").lower() == "true"
             or bool(_HIDING_STYLE.search(a.get("style", ""))) or tag in {"script", "style", "template"}
         )
+        if tag in _BLOCKS and not self._is_hidden() and not hides:
+            self.visible.append("\n")
         if tag not in _VOID:
             self._stack.append((tag, hides))
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in _BLOCKS and not self._is_hidden():
+            self.visible.append("\n")
         a = {k.lower(): (v or "") for k, v in attrs}
         for name in _TEXT_ATTRS:
             if a.get(name, "").strip():
                 self.hidden.append(a[name])
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in _BLOCKS and not self._is_hidden():
+            self.visible.append("\n")
         for i in range(len(self._stack) - 1, -1, -1):
             if self._stack[i][0] == tag:
                 del self._stack[i:]
@@ -149,6 +157,8 @@ class _Extractor(HTMLParser):
     def handle_data(self, data: str) -> None:
         if data.strip():
             (self.hidden if self._is_hidden() else self.visible).append(data)
+        elif not self._is_hidden() and data:
+            self.visible.append(" ")
 
     def handle_comment(self, data: str) -> None:
         if data.strip():
@@ -160,4 +170,5 @@ def extract_html(html: str) -> tuple[str, tuple[str, ...]]:
     parser = _Extractor()
     parser.feed(html)
     parser.close()
-    return " ".join(" ".join(parser.visible).split()), tuple(h.strip() for h in parser.hidden)
+    lines = (" ".join(line.split()) for line in "".join(parser.visible).split("\n"))
+    return "\n".join(line for line in lines if line), tuple(h.strip() for h in parser.hidden)

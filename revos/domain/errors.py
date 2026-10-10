@@ -44,3 +44,19 @@ class QuarantinedContent(RevosError):
         self.findings = findings
         super().__init__("inbound content is quarantined: "
                          + ", ".join(sorted({f.rule_id for f in findings})))
+
+
+class ToolCallBlocked(RevosError):
+    """A tool call an agent needed was refused by the scope guard."""
+
+
+class LoopLimitExceeded(RevosError):
+    """An agent run hit a loop limit: repeated identical call, too many errors or too many calls."""
+
+
+class RunnerMismatch(RevosError):
+    """A recorded run was started by a different runner than the one now asked to resume it."""
+
+
+class ProposalRejected(RevosError):
+    """The orchestrator refused to apply a proposal because its own checks disagreed."""

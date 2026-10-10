@@ -54,6 +54,12 @@ class ClaimVerdict:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class LessonDraft:
+    text: str
+    tags: tuple[str, ...]
+
+
 class LLM(Protocol):
     def classify_reply(self, reply: UntrustedText) -> ReplyClassification: ...
 
@@ -64,3 +70,5 @@ class LLM(Protocol):
     def draft_email(self, request: DraftRequest) -> DraftProposal: ...
 
     def verify_claims(self, draft: Draft, evidence: Evidence) -> Sequence[ClaimVerdict]: ...
+
+    def draft_lesson(self, evidence: UntrustedText) -> LessonDraft: ...

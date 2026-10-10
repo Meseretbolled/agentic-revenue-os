@@ -1,0 +1,10 @@
+# What to read from a company's own website, and how. Rules, not a model: each value comes with
+# the sentence it was found in. SAMPLE keywords for the demo; tune against real sites.
+pages: ["/", "/news"]
+extractors:
+  - {field: location_count, kind: number, pattern: '(\d[\d,]*)\s+(?:locations|practices|stores|dealerships)'}
+  - {field: industry, kind: keyword,
+     map: {optical: ["eye-care", "eyewear", "optometr"], automotive: ["dealership", "auto group"],
+           hospitality: ["hotel"], childcare: ["childcare"], beauty: ["beauty"]}}
+  - {field: is_franchise, kind: flag, any: ["franchise"]}
+  - {field: region, kind: keyword, map: {US: ["Texas", "Oklahoma", "Idaho", "Ohio"], FR: ["France", "Paris"]}}

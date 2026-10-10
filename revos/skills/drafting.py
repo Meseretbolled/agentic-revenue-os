@@ -19,6 +19,7 @@ class DraftOutcome:
     draft: Draft | None
     attempts: int
     issues: tuple[Issue, ...]
+    error: LLMError | None = None     # the typed model error that stopped the draft, if any
 
 
 def render_email(request: DraftRequest, proposal: DraftProposal) -> Draft:
@@ -54,11 +55,11 @@ def draft_with_checks(
             draft = render_email(current, proposal)
         except LLMError as exc:
             return DraftOutcome("needs_human", None, attempts,
-                                (Issue("llm_unavailable", f"{type(exc).__name__}: {exc}"),))
+                                (Issue("llm_unavailable", f"{type(exc).__name__}: {exc}"),), exc)
         result = check_draft(draft, request.evidence, approved_texts, allowed_names, verifier)
         if result.passed:
             return DraftOutcome("passed", draft, attempts, ())
         retryable = not any(i.infrastructure for i in result.issues)
         if not retryable or attempts > max_regenerations:
-            return DraftOutcome("needs_human", draft, attempts, result.issues)
+            return DraftOutcome("needs_human", draft, attempts, result.issues, result.error)
         current = replace(request, feedback=tuple(i.message for i in result.issues))

@@ -18,6 +18,7 @@ autonomy_levels:
   generate_io: auto
   send_io: auto                     # only after the IO validator passes (policy hard block)
   social_message: needs_approval    # draft-only in code; a person sends it
+  lesson_write: auto                # a lesson with quoted evidence, stored for later drafts
   price_message: auto_with_veto     # price mentioned and inside the rate card
 
 max_discount_pct: 15                # SAMPLE; above this the IO is blocked for a manager

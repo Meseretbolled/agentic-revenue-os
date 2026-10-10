@@ -145,7 +145,7 @@ def test_visible_html_instructions_are_flagged_too() -> None:
 
 def test_unclosed_and_messy_html_does_not_break_extraction() -> None:
     visible, hidden = extract_html('<div><p>One<br>Two<div style="display:none">x</p>Three')
-    assert visible.startswith("One Two") and "x" in hidden
+    assert visible.startswith("One\nTwo") and "x" in hidden and "x" not in visible.split()
 
 
 # --- the wrapper ---------------------------------------------------------------------------------

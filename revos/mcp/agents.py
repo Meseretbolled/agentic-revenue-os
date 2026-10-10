@@ -1,5 +1,6 @@
 """Which agent may use which tool, and how an agent's SDK options are built."""
 
+from collections.abc import Callable
 from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server, tool
@@ -24,7 +25,7 @@ AGENT_SCOPES: dict[str, frozenset[str]] = {
                            "casestudies.get"}),
     "reply": frozenset({"crm.get_deal", "crm.get_contact", "lessons.search", "casestudies.pick",
                         "casestudies.get"}),
-    "meeting": frozenset({"crm.get_deal", "crm.get_contact", "lessons.search"}),
+    "meeting": frozenset({"crm.get_deal", "crm.get_contact", "crm.get_company", "lessons.search"}),
     "call_intel": frozenset({"crm.get_deal"}),
     "qualification": frozenset({"crm.get_deal"}),
     "contract_io": frozenset({"crm.get_deal", "crm.get_company", "crm.get_contact"}),
@@ -42,8 +43,13 @@ def mcp_tool_names(agent: str) -> list[str]:
     return [f"mcp__{spec.server}__{spec.name}" for spec in tools_for(agent)]
 
 
-def build_servers(agent: str, ctx: ToolContext) -> dict[str, Any]:
-    """One in-process MCP server per tool group, holding only this agent's tools."""
+def build_servers(agent: str, ctx: ToolContext,
+                  invoke: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None
+                  ) -> dict[str, Any]:
+    """One in-process MCP server per tool group, holding only this agent's tools.
+
+    `invoke` lets a caller route every call through its own wrapper (recording, loop limits)."""
+    route = invoke or (lambda key, args: call_tool(ctx, agent, key, args))
     servers: dict[str, Any] = {}
     for server in sorted({spec.server for spec in tools_for(agent)}):
         sdk_tools = []
@@ -51,7 +57,7 @@ def build_servers(agent: str, ctx: ToolContext) -> dict[str, Any]:
             def make(spec: ToolSpec = spec):
                 @tool(spec.name, spec.description, spec.schema)
                 async def handler(args: dict[str, Any]) -> dict[str, Any]:
-                    return call_tool(ctx, agent, spec.key, args)
+                    return route(spec.key, args)
                 return handler
             sdk_tools.append(make())
         servers[server] = create_sdk_mcp_server(name=server, tools=sdk_tools)
@@ -59,7 +65,8 @@ def build_servers(agent: str, ctx: ToolContext) -> dict[str, Any]:
 
 
 def agent_options(agent: str, ctx: ToolContext, *, system_prompt: str, model: str,
-                  max_turns: int = 8) -> ClaudeAgentOptions:
+                  max_turns: int = 8, invoke: Callable[[str, dict[str, Any]], dict[str, Any]] | None = None,
+                  max_budget_usd: float | None = None) -> ClaudeAgentOptions:
     """SDK options for one agent: no built-in tools, no host settings, only its own MCP tools."""
     return ClaudeAgentOptions(
         system_prompt=system_prompt,
@@ -67,7 +74,8 @@ def agent_options(agent: str, ctx: ToolContext, *, system_prompt: str, model: st
         max_turns=max_turns,
         tools=[],                         # none of the SDK's built-in tools (Bash, Read, Write...)
         setting_sources=[],               # no host settings or CLAUDE.md
-        mcp_servers=build_servers(agent, ctx),
+        mcp_servers=build_servers(agent, ctx, invoke),
         allowed_tools=mcp_tool_names(agent),
         permission_mode="default",
+        max_budget_usd=max_budget_usd,
     )

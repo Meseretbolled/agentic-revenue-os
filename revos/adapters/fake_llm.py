@@ -17,6 +17,7 @@ from revos.ports.llm import (
     DraftProposal,
     DraftRequest,
     ExtractedField,
+    LessonDraft,
     ReplyClassification,
 )
 
@@ -42,6 +43,14 @@ _CALL_RULES: dict[str, tuple[str, ...]] = {
     "decision_maker": ("decision maker", "decision-maker", "sign off", "approve this"),
     "needs": ("we need", "looking for", "need to", "challenge"),
     "objections": ("concern", "worried", "too expensive", "not sure"),
+}
+
+
+_LESSON_TAGS: dict[str, tuple[str, ...]] = {
+    "pricing": ("price", "pricing", "cost", "expensive", "budget"),
+    "compliance": ("compliance", "brand"),
+    "timing": ("timeline", "launch", "weeks", "quarter"),
+    "objection": ("concern", "worried", "not sure"),
 }
 
 
@@ -117,6 +126,15 @@ class FakeLLM:
             verdicts.append(ClaimVerdict(i, ok, "restates its evidence" if ok
                                          else "does not restate its cited evidence"))
         return verdicts
+
+
+    def draft_lesson(self, evidence: UntrustedText) -> LessonDraft:
+        self._enter("draft_lesson")
+        block = evidence.for_model()
+        self.prompts.append(block)
+        quote = " ".join(line for line in block.splitlines()[1:-1]).strip()
+        tags = tuple(t for t, words in _LESSON_TAGS.items() if any(w in quote.casefold() for w in words))
+        return LessonDraft(f"Prospects said: {quote}"[:300], tags)
 
 
 def _claim(text: str, evidence_id: str):

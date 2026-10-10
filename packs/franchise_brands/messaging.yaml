@@ -66,3 +66,17 @@ templates:
 
       {{ unsubscribe_line }}
       {{ postal_address }}
+  meeting_offer:
+    subject: "Re: Scaling local campaigns at {{ company }}"
+    body: |
+      Hi {{ first_name }},
+
+      {{ personalised_line }}
+
+      Times that work on our side:
+      {{ slots_text }}
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}

@@ -13,6 +13,7 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import dict_row
 
+from revos.domain.errors import ActionNotApproved
 from revos.policy.audit import write_audit
 from revos.policy.config import OUTBOUND_TYPES, PolicyConfig
 from revos.policy.settings import kill_switch_on
@@ -144,3 +145,28 @@ def send_with_gate(
         conn.execute("UPDATE actions SET sent_at = %s, hold_reason = NULL WHERE id = %s",
                      (now, action_id))
         return GateResult("sent", provider_id=provider_id)
+
+
+EXECUTABLE_INTERNAL = frozenset({"crm_update", "crm_note"})
+
+
+def run_approved_action(
+    conn: psycopg.Connection,
+    action_id: UUID,
+    provider: ActionProvider,
+    clock: Clock,
+    config: PolicyConfig,
+) -> GateResult:
+    """Execute an approved action. Outbound types go through the full send gate; CRM writes go
+    straight to the outbox, which still re-reads the decision from the database."""
+    row = conn.execute("SELECT type FROM actions WHERE id = %s", (action_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"no action {action_id}")
+    if row[0] in OUTBOUND_TYPES:
+        return send_with_gate(conn, action_id, provider, clock, config)
+    if row[0] in EXECUTABLE_INTERNAL:
+        try:
+            return GateResult("sent", provider_id=execute_action(conn, action_id, provider, clock))
+        except ActionNotApproved as exc:
+            return GateResult("refused", str(exc))
+    return GateResult("refused", "not an executable action")

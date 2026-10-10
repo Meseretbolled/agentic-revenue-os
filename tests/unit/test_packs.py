@@ -118,6 +118,12 @@ def no_unsubscribe(d): d["templates"]["first_touch"]["body"] = "Hi {{ postal_add
 def jinja_error(d): d["templates"]["follow_up"]["body"] = "{% if %} {{ unsubscribe_line }}{{ postal_address }}"
 def missing_template(d): del d["templates"]["case_study_reply"]
 def wrong_id(d): d["id"] = "something_else"
+def bad_regex(d): d["extractors"][0]["pattern"] = "(unclosed"
+def two_groups(d): d["extractors"][0]["pattern"] = r"(\d+)\s+(\w+)"
+def unknown_lead_field(d): d["extractors"][0]["field"] = "not_a_lead_field"
+def relative_page(d): d["pages"] = ["news"]
+def empty_keyword_map(d): d["extractors"][1]["map"] = {}
+def no_meeting_offer(d): del d["templates"]["meeting_offer"]
 
 
 INVALID = [
@@ -144,6 +150,12 @@ INVALID = [
     ("messaging.yaml", jinja_error, "templates.follow_up.body", "syntax error"),
     ("messaging.yaml", missing_template, "templates", "case_study_reply"),
     ("pack.yaml", wrong_id, "id", "must match the folder name"),
+    ("enrichment.yaml", bad_regex, "extractors.0", "valid regular expression"),
+    ("enrichment.yaml", two_groups, "extractors.0", "exactly one capture group"),
+    ("enrichment.yaml", unknown_lead_field, "extractors.0.field", "not declared in icp.yaml"),
+    ("enrichment.yaml", relative_page, "pages", "starting with '/'"),
+    ("enrichment.yaml", empty_keyword_map, "extractors.1", "non-empty map"),
+    ("messaging.yaml", no_meeting_offer, "templates", "meeting_offer"),
 ]
 
 

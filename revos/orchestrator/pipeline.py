@@ -1,0 +1,468 @@
+"""The orchestrator: runs agents, then decides what their proposals become.
+
+The only code that turns a proposal into anything. For each proposal it recomputes what it can
+from the database, asks the policy engine, creates the outbox action, and applies internal
+effects. It is also the only caller of transition_deal for agent-driven moves.
+"""
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from typing import Any
+from uuid import UUID
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
+from revos.agents.broker import ToolBroker
+from revos.agents.common import check_inputs, evidence_from_fields, lead_facts
+from revos.agents.registry import AGENTS
+from revos.agents.runner import AgentRunner
+from revos.agents.store import RunRow, RunStore
+from revos.agents.types import AgentEnv, Identity
+from revos.domain.drafting import Claim, Draft
+from revos.domain.enums import Tier
+from revos.domain.errors import (
+    ExitCriteriaNotMet,
+    LLMError,
+    LoopLimitExceeded,
+    ProposalRejected,
+    QuarantinedContent,
+    SpendCapExceeded,
+    ToolCallBlocked,
+)
+from revos.domain.stages import DealStage, can_transition
+from revos.domain.untrusted import UntrustedText
+from revos.mcp.registry import BlockEvent, ToolContext
+from revos.mcp.scope import fixed_scope
+from revos.orchestrator.transitions import transition_deal
+from revos.policy.audit import write_audit
+from revos.policy.config import PolicyConfig
+from revos.policy.engine import ActionRequest
+from revos.policy.gate import GateResult, run_approved_action
+from revos.policy.service import propose_action, release_veto_expired
+from revos.ports.calendar import Slot
+from revos.ports.clock import Clock
+from revos.ports.provider import ActionProvider
+from revos.ports.research import Research
+from revos.runtime.events import record_event
+from revos.runtime.quarantine import record_quarantine
+from revos.segments.loader import Pack
+from revos.skills.claims import deterministic_check
+from revos.skills.io import validate_io
+from revos.skills.scoring import score_lead
+
+# A run that ends one of these ways goes to a person, with an audit entry. Order matters.
+HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
+    (SpendCapExceeded, "spend_cap_exceeded"), (QuarantinedContent, "quarantined"),
+    (LoopLimitExceeded, "loop_limit"), (ToolCallBlocked, "tool_blocked"),
+    (LLMError, "llm_error"), (ExitCriteriaNotMet, "exit_criteria_not_met"),
+    (ProposalRejected, "proposal_rejected"),
+)
+INTERNAL = {"enrich", "score", "classify_reply", "suppress_contact", "cancel_scheduled_sends",
+            "snooze_ooo", "reminder", "attach_case_study", "generate_io", "lesson_write"}
+SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note"}
+FIELD_PREFIXES = ("fact:", "fact_source:")
+
+
+def cause_of(exc: Exception) -> str:
+    return next((code for cls, code in HUMAN_CAUSES if isinstance(exc, cls)), "")
+
+
+@dataclass(frozen=True)
+class RunResult:
+    run_id: UUID
+    agent: str
+    step: str
+    runner: str
+    status: str
+    human_reason: str | None
+    output: dict[str, Any]
+    proposals: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PipelineResult:
+    status: str                      # action_proposed | closed | needs_human
+    stage: str
+    runner: str
+    reason: str | None = None
+    action_id: UUID | None = None
+    decision: str | None = None
+    runs: tuple[tuple[str, str], ...] = ()
+
+
+class Orchestrator:
+    def __init__(self, conn: psycopg.Connection, ro_conn: psycopg.Connection, *, clock: Clock,
+                 packs: Mapping[str, Pack], runner: AgentRunner, research: Research,
+                 provider: ActionProvider, identity: Identity | None = None, demo_mode: bool = True,
+                 allowed_recipients: frozenset[str] = frozenset(),
+                 slots: Callable[[], tuple[Slot, ...]] = lambda: ()) -> None:
+        self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
+        self.runner, self.research, self.provider = runner, research, provider
+        self.identity = identity or Identity()
+        self.demo_mode, self.allowed_recipients, self.slots = demo_mode, allowed_recipients, slots
+        self.store = RunStore(conn)
+
+    # --- reading ----------------------------------------
+    def _deal(self, deal_id: UUID) -> dict[str, Any]:
+        row = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT d.*, c.full_name AS contact_name, co.name AS company_name, co.domain "
+            "FROM deals d LEFT JOIN contacts c ON c.id = d.contact_id "
+            "LEFT JOIN companies co ON co.id = d.company_id WHERE d.id = %s", (deal_id,)).fetchone()
+        if row is None:
+            raise LookupError(f"no deal {deal_id}")
+        return row
+
+    def _pack(self, deal: Mapping[str, Any]) -> Pack:
+        return self.packs[deal["segment_id"]]
+
+    def policy_config(self, pack: Pack) -> PolicyConfig:
+        return PolicyConfig.from_pack(pack, demo_mode=self.demo_mode,
+                                      allowed_recipients=self.allowed_recipients)
+
+    def _tool_ctx(self, deal_id: UUID) -> ToolContext:
+        def blocked(event: BlockEvent) -> None:
+            write_audit(self.conn, "tools", "tool.blocked", event.deal_id or deal_id,
+                        {"agent": event.agent, "tool": event.tool, "reason": event.reason})
+
+        def quarantined(content: UntrustedText, deal: UUID) -> None:
+            record_quarantine(self.conn, content, deal)
+
+        return ToolContext(self.ro_conn, self.packs, self.research, fixed_scope(self.ro_conn, deal_id),
+                           blocked, quarantined)
+
+    # --- running an agent ----------------------------------------
+    def run_agent(self, deal_id: UUID, agent: str, step: str, *, input_: Mapping[str, Any] | None = None,
+                  untrusted: Mapping[str, UntrustedText] | None = None,
+                  slots: tuple[Slot, ...] = ()) -> RunResult:
+        """Run (or resume, or replay the record of) one agent step. Safe to call twice."""
+        spec = AGENTS[agent]
+        deal = self._deal(deal_id)
+        pack = self._pack(deal)
+        summary = {"input": dict(input_ or {}),
+                   "untrusted": {k: {"origin": v.origin, "boundary": v.boundary}
+                                 for k, v in (untrusted or {}).items()}}
+        row = self.store.start(deal_id, agent, step, self.runner.name, summary)
+        if row.status != "running":                               # a recorded result: not re-run
+            return self._result(row)
+        write_audit(self.conn, "orchestrator", "agent.run_started" if row.created
+                    else "agent.run_resumed", deal_id,
+                    {"agent": agent, "step": step, "runner": self.runner.name,
+                     "kind": spec.kind, "recorded_steps": row.step_count})
+
+        ctx = self._tool_ctx(deal_id)
+        broker = ToolBroker(self.store, row.id, agent, ctx)
+        env = AgentEnv(agent, step, self.runner.name, deal_id, deal["contact_id"], deal["company_id"],
+                       pack, broker, self.clock, self.identity, dict(input_ or {}),
+                       dict(untrusted or {}), slots)
+        try:
+            output = self.runner.run(spec, env, store=self.store, run_id=row.id, tool_ctx=ctx)
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            if isinstance(exc, QuarantinedContent):
+                for item in (untrusted or {}).values():
+                    if item.flagged:
+                        record_quarantine(self.conn, item, deal_id)
+            return self._finish(row, deal_id, "needs_human", {"runner": self.runner.name,
+                                "cause": cause_of(exc)}, f"{cause_of(exc)}: {exc}", ())
+        info = {"runner": self.runner.name, "notes": output.notes,
+                "stage_suggestion": output.stage_suggestion.value if output.stage_suggestion else None,
+                "tools_run": broker.executed, "tools_replayed": broker.replayed}
+        if output.needs_human:
+            return self._finish(row, deal_id, "needs_human", info, output.needs_human, ())
+        return self._finish(row, deal_id, "completed", info, None, output.proposals)
+
+    def _finish(self, row: RunRow, deal_id: UUID, status: str, info: dict[str, Any],
+                reason: str | None, proposals) -> RunResult:
+        self.store.finish(row.id, deal_id, status, info, reason, proposals)
+        done = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT * FROM agent_runs WHERE id = %s", (row.id,)).fetchone()
+        return self._result(RunRow(done["id"], done["agent"], done["step"], done["runner"],
+                                   done["status"], done["output"], done["human_reason"],
+                                   done["step_count"], False))
+
+    def _result(self, row: RunRow) -> RunResult:
+        return RunResult(row.id, row.agent, row.step, row.runner, row.status, row.human_reason,
+                         row.output or {}, self.store.proposals(row.id))
+
+    # --- applying proposals ----------------------------------------
+    def apply_run(self, run: RunResult, deal_id: UUID) -> list[dict[str, Any]]:
+        """Turn each pending proposal into a policy decision and its effect. Safe to call twice."""
+        applied = []
+        for proposal in self.store.proposals(run.run_id):
+            if proposal["status"] != "pending":
+                continue
+            try:
+                applied.append(self._apply_one(run, deal_id, proposal))
+            except ProposalRejected as exc:
+                self.conn.execute("UPDATE agent_proposals SET status = 'rejected', outcome = %s "
+                                  "WHERE run_id = %s AND idx = %s",
+                                  (f"rejected: {exc}", run.run_id, proposal["idx"]))
+                write_audit(self.conn, "orchestrator", "agent.proposal_rejected", deal_id,
+                            {"run_id": str(run.run_id), "idx": proposal["idx"],
+                             "action_type": proposal["action_type"], "why": str(exc)})
+                raise
+        return applied
+
+    def _apply_one(self, run: RunResult, deal_id: UUID, p: dict[str, Any]) -> dict[str, Any]:
+        deal = self._deal(deal_id)
+        pack = self._pack(deal)
+        payload = dict(p["payload"])
+        contact_id = payload.pop("_contact_id", None)
+        atype = p["action_type"]
+        key = f"{deal_id}:{run.step}:{p['idx']}"                  # deal id plus step, never random
+        with self.conn.transaction():
+            request = self._policy_request(atype, deal, pack, payload)
+            proposal = propose_action(
+                self.conn, self.clock, self.policy_config(pack), key=key, request=request,
+                deal_id=deal_id, contact_id=UUID(contact_id) if contact_id else None,
+                payload=payload)
+            action = self.conn.cursor(row_factory=dict_row).execute(
+                "SELECT id, status, hold_reason, veto_until FROM actions WHERE id = %s",
+                (proposal.action_id,)).fetchone()
+            approved = action["status"] == "approved"
+            if atype in INTERNAL and approved:
+                self._effect(atype, deal, pack, payload, run)
+            elif atype in SENDABLE and action["status"] in {"approved", "pending"}:
+                self._queue_send(action, key)
+            outcome = (proposal.decision.outcome.value if proposal.decision
+                       else f"existing:{action['status']}")
+            rejected = action["status"] == "cancelled"
+            self.conn.execute(
+                "UPDATE agent_proposals SET status = %s, action_id = %s, outcome = %s "
+                "WHERE run_id = %s AND idx = %s",
+                ("rejected" if rejected else "applied", action["id"], outcome, run.run_id, p["idx"]))
+        return {"idx": p["idx"], "action_type": atype, "action_id": action["id"],
+                "status": action["status"], "outcome": outcome}
+
+    def _policy_request(self, atype: str, deal: Mapping[str, Any], pack: Pack,
+                        payload: Mapping[str, Any]) -> ActionRequest:
+        tier = Tier(deal["tier"]) if deal["tier"] else None
+        fields = deal["fields"] or {}
+        if atype in {"first_touch", "follow_up"}:
+            return ActionRequest(atype, tier=tier, body=str(payload.get("body", "")),
+                                 claim_check_passed=self._recheck_claims(deal, pack, payload))
+        if atype == "send_io":
+            check = validate_io(pack, fields)
+            if not check.ok:      # recomputed from the database; the agent's word is not enough
+                raise ProposalRejected("the IO does not validate: " + "; ".join(check.problems))
+            return ActionRequest(atype, io_validated=check.ok,
+                                 discount_pct=float(fields.get("discount_pct", 0) or 0))
+        if atype == "attach_case_study":
+            return ActionRequest(atype, from_library=any(
+                c.id == payload.get("case_study_id") for c in pack.case_studies))
+        return ActionRequest(atype)
+
+    def _recheck_claims(self, deal: Mapping[str, Any], pack: Pack, payload: Mapping[str, Any]) -> bool:
+        """The orchestrator re-runs the code checks on the draft against the DATABASE's facts."""
+        template = pack.messaging.templates.get(str(payload.get("template", "")))
+        if template is None:
+            return False                      # an unknown template cannot be checked, so it fails
+        study = next((c for c in pack.case_studies if c.id == payload.get("case_study_id")), None)
+        extra = list(payload.get("approved_extra", []))
+        approved, names = check_inputs(pack, template, self.identity, deal["company_name"] or "",
+                                       deal["contact_name"], study, extra)
+        draft = Draft(payload["subject"], payload["body"], tuple(
+            Claim(c["text"], tuple(c["evidence"])) for c in payload.get("claims", [])))
+        issues = deterministic_check(draft, evidence_from_fields(deal["fields"] or {}), approved, names)
+        return not issues
+
+    def _queue_send(self, action: Mapping[str, Any], key: str) -> None:
+        if action["status"] == "approved":
+            record_event(self.conn, f"send:{key}", "action.send", {"action_id": str(action["id"])},
+                         self.clock)
+        elif action["veto_until"] is not None:
+            record_event(self.conn, f"veto:{key}", "action.veto_expired",
+                         {"action_id": str(action["id"])}, self.clock, run_at=action["veto_until"])
+
+    # --- internal effects ----------------------------------------
+    def _effect(self, atype: str, deal: Mapping[str, Any], pack: Pack, payload: dict[str, Any],
+                run: RunResult) -> None:
+        deal_id = deal["id"]
+        if atype == "enrich":
+            allowed = set(pack.scoring.lead_fields) | set(pack.stages.qualification_fields) | {
+                "company_domain"}
+            props = dict(payload["properties"])
+            bad = [k for k in props if k not in allowed and not k.startswith(FIELD_PREFIXES)]
+            if bad:
+                raise ProposalRejected("field(s) not allowed for enrichment: " + ", ".join(bad))
+            self._merge_fields(deal_id, props)
+        elif atype == "score":
+            facts = lead_facts(deal["fields"] or {}, pack)
+            result = score_lead(facts, pack.scoring)
+            if (result.total, result.tier.value) != (payload["total"], payload["tier"]):
+                raise ProposalRejected("the proposed score differs from the pack's rules")
+            self.conn.execute(
+                "UPDATE deals SET tier = %s, fit_score = %s, intent_score = %s, engagement_score = %s, "
+                "total_score = %s, score_reason = %s, updated_at = now() WHERE id = %s",
+                (result.tier.value, result.fit, result.intent, result.engagement, result.total,
+                 result.summary, deal_id))
+        elif atype == "classify_reply":
+            if payload.get("message_id"):
+                self.conn.execute("UPDATE messages SET classification = %s WHERE message_id = %s",
+                                  (payload["label"], payload["message_id"]))
+            write_audit(self.conn, "orchestrator", "reply.classified", deal_id,
+                        {"label": payload["label"], "confidence": payload["confidence"]})
+        elif atype in {"suppress_contact", "cancel_scheduled_sends"}:
+            self._opt_out(deal, atype, payload)
+        elif atype == "attach_case_study":
+            self._merge_fields(deal_id, {"proposed_case_study": payload["case_study_id"]})
+        elif atype == "generate_io":
+            self.conn.execute(
+                "INSERT INTO documents (deal_id, kind, version, body, validation) VALUES "
+                "(%s, 'io', 1, %s, %s) ON CONFLICT (deal_id, kind, version) DO UPDATE SET "
+                "body = EXCLUDED.body, validation = EXCLUDED.validation",
+                (deal_id, payload["document"], Jsonb({"ok": payload["ok"],
+                                                       "problems": payload["problems"],
+                                                       "total": payload["total"]})))
+        elif atype == "lesson_write":
+            self._write_lesson(deal, payload)
+        else:                                                   # snooze_ooo, reminder
+            write_audit(self.conn, "orchestrator", f"agent.{atype}", deal_id, dict(payload))
+
+    def _merge_fields(self, deal_id: UUID, props: Mapping[str, Any]) -> None:
+        self.conn.execute("UPDATE deals SET fields = fields || %s, updated_at = now() WHERE id = %s",
+                          (Jsonb(dict(props)), deal_id))
+
+    def _opt_out(self, deal: Mapping[str, Any], atype: str, payload: Mapping[str, Any]) -> None:
+        contact = deal["contact_id"]
+        if contact is None:
+            return
+        if atype == "suppress_contact":
+            self.conn.execute(
+                "UPDATE contacts SET suppressed = true, suppressed_reason = %s, "
+                "suppressed_at = coalesce(suppressed_at, now()) WHERE id = %s",
+                (payload.get("reason", "opt-out"), contact))
+        cancelled = self.conn.execute(
+            "UPDATE actions SET status = 'cancelled', decision = 'rejected', "
+            "decision_by = 'policy:opt_out', decided_at = now(), hold_reason = 'opt_out' "
+            "WHERE contact_id = %s AND status IN ('pending', 'awaiting_approval', 'approved') "
+            "AND type IN ('first_touch', 'follow_up', 'send_io')", (contact,)).rowcount
+        write_audit(self.conn, "orchestrator", f"agent.{atype}", deal["id"],
+                    {"contact_id": str(contact), "sends_cancelled": cancelled})
+
+    def _write_lesson(self, deal: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
+        evidence = UntrustedText.wrap("transcript", str(payload.get("origin", "lesson")),
+                                      str(payload["evidence"]))
+        if evidence.flagged:
+            raise ProposalRejected("the lesson's evidence quote looks like an instruction")
+        same = self.conn.execute("SELECT 1 FROM lessons WHERE segment_id = %s AND lower(text) = lower(%s)",
+                                 (deal["segment_id"], payload["text"])).fetchone()
+        if same is None:
+            self.conn.execute("INSERT INTO lessons (segment_id, text, evidence, tags) "
+                              "VALUES (%s, %s, %s, %s)",
+                              (deal["segment_id"], payload["text"], payload["evidence"],
+                               list(payload.get("tags", []))))
+
+    # --- stage moves: only here ----------------------------------------
+    def advance(self, deal_id: UUID, to_stage: DealStage, reason: str) -> bool:
+        deal = self._deal(deal_id)
+        current = DealStage(deal["stage"])
+        if current == to_stage or not can_transition(current, to_stage):
+            return False
+        transition_deal(self.conn, deal_id, to_stage, actor="orchestrator", reason=reason,
+                        exit_criteria=self._pack(deal).stages.exit_criteria)
+        return True
+
+    # --- the slice: lead.created -> enrichment -> scoring -> outreach proposal -----------------------------
+    def handle_lead_created(self, deal_id: UUID) -> PipelineResult:
+        runs: list[tuple[str, str]] = []
+
+        def stop(status: str, reason: str | None, **kw: Any) -> PipelineResult:
+            stage = self._deal(deal_id)["stage"]
+            if status == "needs_human":
+                write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
+                            {"runner": self.runner.name, "stage": stage, "reason": reason})
+            return PipelineResult(status, stage, self.runner.name, reason, runs=tuple(runs), **kw)
+
+        try:
+            for agent, step, stage_in, stage_out in (
+                    ("enrichment", "enrich", DealStage.NEW, DealStage.ENRICHED),
+                    ("scoring", "score", DealStage.ENRICHED, DealStage.SCORED)):
+                if DealStage(self._deal(deal_id)["stage"]) is not stage_in:
+                    continue
+                run = self.run_agent(deal_id, agent, step)
+                runs.append((agent, run.status))
+                if run.status != "completed":
+                    return stop("needs_human", run.human_reason)
+                self.apply_run(run, deal_id)
+                self.advance(deal_id, stage_out, f"{agent} finished")
+
+            deal = self._deal(deal_id)
+            if deal["tier"] == Tier.DISQUALIFIED.value:
+                self.advance(deal_id, DealStage.CLOSED_LOST, "disqualified by the scoring rules")
+                return stop("closed", "disqualified by the scoring rules")
+            if DealStage(deal["stage"]) is not DealStage.SCORED:
+                return stop("completed", None)
+
+            run = self.run_agent(deal_id, "outreach", "outreach.1", input_={"kind": "first_touch"})
+            runs.append(("outreach", run.status))
+            if run.status != "completed":
+                return stop("needs_human", run.human_reason)
+            applied = self.apply_run(run, deal_id)
+            first = applied[0] if applied else None
+            return stop("action_proposed", None, action_id=first["action_id"] if first else None,
+                        decision=first["outcome"] if first else None)
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            return stop("needs_human", f"{cause_of(exc)}: {exc}")
+
+    # --- a customer reply ---------------------------------------------------------------------------------
+    def handle_reply(self, deal_id: UUID, email: Any) -> PipelineResult:
+        """Wrap, store and classify an inbound email. Flagged text is quarantined, never obeyed."""
+        deal = self._deal(deal_id)
+        reply = UntrustedText.wrap("reply", email.message_id, email.body, is_html=email.is_html)
+        self.conn.execute(
+            "INSERT INTO messages (deal_id, contact_id, direction, message_id, in_reply_to, subject, "
+            "body, quarantined) VALUES (%s, %s, 'inbound', %s, %s, %s, %s, %s) "
+            "ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING",
+            (deal_id, deal["contact_id"], email.message_id, email.in_reply_to, email.subject,
+             email.body, reply.flagged))
+        step = f"reply:{email.message_id}"
+        try:
+            run = self.run_agent(deal_id, "reply", step, input_={"message_id": email.message_id},
+                                 untrusted={"reply": reply})
+            if run.status != "completed":
+                write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
+                            {"runner": self.runner.name, "reason": run.human_reason})
+                return PipelineResult("needs_human", deal["stage"], self.runner.name,
+                                      run.human_reason, runs=(("reply", run.status),))
+            self.apply_run(run, deal_id)
+            suggestion = run.output.get("stage_suggestion")
+            if suggestion:
+                self.advance(deal_id, DealStage(suggestion), "reply classified")
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            return PipelineResult("needs_human", self._deal(deal_id)["stage"], self.runner.name,
+                                  f"{cause_of(exc)}: {exc}", runs=(("reply", "needs_human"),))
+        return PipelineResult("completed", self._deal(deal_id)["stage"], self.runner.name,
+                              runs=(("reply", "completed"),))
+
+    # --- sending ----------------------------------------
+    def send_action(self, action_id: UUID) -> GateResult:
+        """Hand an approved action to the send gate. A first touch that goes out moves the deal."""
+        row = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT a.type, a.deal_id, d.segment_id FROM actions a JOIN deals d ON d.id = a.deal_id "
+            "WHERE a.id = %s", (action_id,)).fetchone()
+        pack = self.packs[row["segment_id"]]
+        result = run_approved_action(self.conn, action_id, self.provider, self.clock,
+                                     self.policy_config(pack))
+        if result.status == "sent" and row["type"] == "first_touch":
+            self.advance(row["deal_id"], DealStage.OUTREACH, "first touch sent")
+        elif result.status == "deferred" and result.run_at:
+            record_event(self.conn, f"send:{action_id}:{result.run_at.isoformat()}", "action.send",
+                         {"action_id": str(action_id)}, self.clock, run_at=result.run_at)
+        return result
+
+    def handlers(self) -> dict[str, Callable[[psycopg.Connection, Any], None]]:
+        """Job handlers for the worker."""
+        def lead_created(_conn: psycopg.Connection, job: Any) -> None:
+            self.handle_lead_created(UUID(job.payload["deal_id"]))
+
+        def send(_conn: psycopg.Connection, job: Any) -> None:
+            self.send_action(UUID(job.payload["action_id"]))
+
+        def veto_expired(_conn: psycopg.Connection, job: Any) -> None:
+            for action_id in release_veto_expired(self.conn, self.clock):
+                self.send_action(action_id)
+
+        return {"lead.created": lead_created, "action.send": send, "action.veto_expired": veto_expired}
+

@@ -4,6 +4,7 @@ Every model forbids unknown keys, so a typo in a pack is an error that names the
 field, not a silently ignored setting.
 """
 
+import re
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -170,6 +171,46 @@ class ScoringConfig(Strict):
         return self
 
 
+# --- enrichment.yaml ---------------------------------------------------------------------
+
+class Extractor(Strict):
+    """Reads one lead field out of page text. Rules, not a model: reproducible and quotable."""
+
+    field: str = Field(min_length=1)
+    kind: Literal["number", "keyword", "flag"]
+    pattern: str | None = None                       # number: one capture group
+    map: dict[str, list[str]] | None = None          # keyword: value -> words that imply it
+    any: list[str] | None = None                     # flag: true if any of these words appear
+
+    @model_validator(mode="after")
+    def _shape(self) -> "Extractor":
+        if self.kind == "number":
+            try:
+                compiled = re.compile(self.pattern or "")
+            except re.error as exc:
+                raise ValueError(f"pattern is not a valid regular expression: {exc}") from exc
+            if not self.pattern or compiled.groups != 1:
+                raise ValueError("a number extractor needs a pattern with exactly one capture group")
+        elif self.kind == "keyword" and not self.map:
+            raise ValueError("a keyword extractor needs a non-empty map")
+        elif self.kind == "flag" and not self.any:
+            raise ValueError("a flag extractor needs a non-empty 'any' list")
+        return self
+
+
+class EnrichmentConfig(Strict):
+    pages: list[str] = Field(min_length=1)           # paths on the company's own site
+    extractors: list[Extractor] = Field(min_length=1)
+
+    @field_validator("pages")
+    @classmethod
+    def _paths(cls, value: list[str]) -> list[str]:
+        bad = [p for p in value if not p.startswith("/")]
+        if bad:
+            raise ValueError("pages must be paths starting with '/': " + ", ".join(bad))
+        return value
+
+
 # --- stages.yaml -------------------------------------------------------------------------
 
 class StagesConfig(Strict):
@@ -265,7 +306,7 @@ class Messaging(Strict):
     @field_validator("templates")
     @classmethod
     def _required_templates(cls, value: dict[str, EmailTemplate]) -> dict[str, EmailTemplate]:
-        missing = sorted({"first_touch", "follow_up", "case_study_reply"} - set(value))
+        missing = sorted({"first_touch", "follow_up", "case_study_reply", "meeting_offer"} - set(value))
         if missing:
             raise ValueError("missing template(s): " + ", ".join(missing))
         return value
