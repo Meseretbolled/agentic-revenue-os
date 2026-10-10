@@ -61,7 +61,8 @@ def execute_action(
         if action["status"] != "approved" or action["decision"] != "approved":
             raise ActionNotApproved(f"action {action_id} is {action['status']}, not approved")
 
-        existing = provider.find(action["idempotency_key"])
+        find_for = getattr(provider, "find_for", None)
+        existing = (find_for(action) if find_for else provider.find(action["idempotency_key"]))
         if existing is not None:
             provider_id, recovered = existing, True
         else:

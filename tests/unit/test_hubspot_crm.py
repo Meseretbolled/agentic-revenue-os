@@ -259,9 +259,9 @@ def test_perform_adds_a_note_to_the_deal_looked_up_by_our_deal_id(rig) -> None:
     assert ("notes", note, "?", deal) in fake.associations
 
 
-def test_a_note_for_a_deal_not_in_hubspot_yet_is_a_permanent_error(rig) -> None:
+def test_a_note_for_a_deal_not_in_hubspot_yet_is_retried_later_not_dead_lettered(rig) -> None:
     crm, *_ = rig
-    with pytest.raises(PermanentError, match="not in HubSpot yet"):
+    with pytest.raises(HubSpotUnavailable, match="not in HubSpot yet"):
         crm.perform(action("crm_note", "kn", {"record_id": "unknown", "text": "x"}))
 
 

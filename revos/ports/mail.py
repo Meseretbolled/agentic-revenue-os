@@ -24,6 +24,7 @@ class OutboundEmail:
     body: str
     in_reply_to: str | None = None
     attachments: tuple[Attachment, ...] = ()
+    references: tuple[str, ...] = ()           # the whole thread so far, oldest first
 
 
 def build_ics(uid: str, start: datetime, minutes: int, summary: str, attendee: str,
@@ -51,6 +52,7 @@ class InboundEmail:
     received_at: datetime
     in_reply_to: str | None = None
     is_html: bool = False
+    references: tuple[str, ...] = ()
 
 
 class Mailer(Protocol):

@@ -67,6 +67,35 @@ Several of our stages share one HubSpot stage, so the exact one is also stored i
 * Through the outbox, `find(key)` is the check-before-retry lookup, so a crash between HubSpot
   saving a record and us recording it never produces a second record.
 
+## Gmail (SMTP send, IMAP read)
+
+**Status: built and tested against a fake SMTP/IMAP server only. Nothing here has run against
+real Gmail yet.**
+
+* **Send** (`smtp.gmail.com:465`, app password). The recipient is the contact row's address, never
+  the payload, and must be in the demo allowlist (`PROSPECT_TEST_EMAIL` and the sender). The unsubscribe
+  line and `POSTAL_ADDRESS` footer must be in the body or the send is refused. The Message-ID is derived
+  from the action's idempotency key, and an `X-Revos-Key` header is a second handle.
+* **Retry after a crash**: `find_sent(key)` searches the Sent mailbox by `X-GM-RAW rfc822msgid:`, so
+  the outbox finds a mail Gmail already accepted and records it instead of sending again.
+* **Threading**: follow-ups set `In-Reply-To` (the message being answered) and `References` (the
+  thread so far, oldest first).
+* **Replies**: `email.poll` is a scheduled event with one key per poll window. The inbox searches only
+  for messages whose `In-Reply-To`/`References` name one of our Message-IDs, or that come from the
+  allowlisted prospect. Other mail is never fetched, stored or logged. A delivered reply gets the
+  `revos-processed` label (after it was handled), and the search excludes that label.
+* **Daily cap**: `daily_cap` (default 20, below Gmail's own limit) is enforced by the send gate.
+* **HubSpot from the orchestrator**: stage, score, tier, reason, outreach status, call fields, lesson
+  ids and a note for every email sent and call summary. Each write is its own outbox action, so a CRM
+  failure never touches an email and a retried email never duplicates a CRM record. A queued CRM
+  write that a newer snapshot replaces is cancelled, so an old retry cannot move a stage backwards.
+
+**To confirm with the real service** (`make live-gmail`, `scripts/gmail_reply_check.py`):
+Gmail keeps our Message-ID (it may rewrite it, and then the `X-Revos-Key` fallback is used); the
+exact `X-GM-RAW` and `HEADER` search syntax; `+X-GM-LABELS` creating the `revos-processed` label;
+the folder name `"[Gmail]/Sent Mail"` (it is localised for some accounts); and how long a sent mail takes
+to appear in Sent (the live test waits up to 60 seconds).
+
 ## Other services
 
 `revos doctor` checks each with one harmless read and prints one line: `REAL OK`, `REAL FAILED`
@@ -78,7 +107,7 @@ value. Of these, **only HubSpot has been run against the real service so far.**
 | Postgres | `SELECT 1` | seen working locally |
 | LLM budget | reads the spend ledger; never calls the model | not run with a live key |
 | Slack | `auth.test` | unverified live |
-| Gmail | IMAP login and logout only | unverified live |
+| Gmail | IMAP login and logout only | unverified live (see the Gmail section) |
 | Fireflies | GraphQL `{ user { user_id } }` | unverified live |
 | Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | unverified live |
 | Tavily | one search with one result (uses one credit) | unverified live |
@@ -90,5 +119,7 @@ value. Of these, **only HubSpot has been run against the real service so far.**
 revos doctor                       # one status per service
 revos hubspot-setup                # create the custom properties (safe to repeat)
 revos reset-demo --hubspot         # delete ONLY records flagged revos_demo=true (asks first)
+make live-gmail                    # sends ONE email to PROSPECT_TEST_EMAIL, checks find_sent
+.venv/bin/python scripts/gmail_reply_check.py   # reply by hand; shows the reply fetched, matched, delivered once
 make live-hubspot                  # hubspot-setup, then the live tests (one fictional contact/company/deal, cleaned up)
 ```

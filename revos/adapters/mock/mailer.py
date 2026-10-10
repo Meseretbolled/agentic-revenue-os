@@ -50,7 +50,8 @@ class MockMailer:
                                      datetime.fromisoformat(invite["start"]),
                                      int(invite.get("minutes", 30)), invite["summary"], to),)
         return self.send(OutboundEmail(action["idempotency_key"], to, payload["subject"],
-                                       payload["body"], payload.get("in_reply_to"), attachments))
+                                       payload["body"], payload.get("in_reply_to"), attachments,
+                                       tuple(payload.get("references", ()))))
 
 
 class MockInbox:

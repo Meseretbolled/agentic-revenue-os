@@ -1,4 +1,4 @@
-.PHONY: setup lint test verify db-up db-down demo live-hubspot
+.PHONY: setup lint test verify db-up db-down demo live-hubspot live-gmail
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -33,3 +33,7 @@ demo: db-up
 live-hubspot: db-up
 	$(VENV)/bin/revos hubspot-setup
 	$(PY) -m pytest -m live tests/live/test_hubspot_live.py -v
+
+# Real Gmail, real credentials from .env. Sends ONE email to PROSPECT_TEST_EMAIL. Not part of `make verify`.
+live-gmail:
+	$(PY) -m pytest -m live tests/live/test_gmail_live.py -v

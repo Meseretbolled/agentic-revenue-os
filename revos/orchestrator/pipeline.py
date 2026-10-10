@@ -6,7 +6,7 @@ effects. It is also the only caller of transition_deal for agent-driven moves.
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
@@ -15,6 +15,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from revos.adapters.hubspot.crm import build_deal_properties
 from revos.agents.broker import ToolBroker
 from revos.agents.common import check_inputs, clean_fields, evidence_from_fields, lead_facts
 from revos.agents.registry import AGENTS
@@ -47,6 +48,7 @@ from revos.policy.settings import release_held_sends
 from revos.ports.calendar import Calendar, Slot
 from revos.ports.clock import Clock
 from revos.ports.esign import ESign
+from revos.ports.mail import Inbox
 from revos.ports.provider import ActionProvider
 from revos.ports.research import Research
 from revos.ports.transcripts import Transcripts
@@ -55,6 +57,7 @@ from revos.runtime.events import record_event
 from revos.runtime.quarantine import record_quarantine
 from revos.segments.loader import Pack
 from revos.skills.claims import deterministic_check
+from revos.skills.crm_fields import call_summary, outreach_status, sequence_day
 from revos.skills.handoff import build_handoff
 from revos.skills.io import manager_ceiling, validate_io
 from revos.skills.scoring import score_lead
@@ -118,7 +121,8 @@ class Orchestrator:
                  calendar: Calendar | None = None, transcripts: Transcripts | None = None,
                  learn_from_replies: bool = False, esign: ESign | None = None,
                  handoff_channel: str = "#revops",
-                 customer_success_owner: str = "customer-success") -> None:
+                 customer_success_owner: str = "customer-success", inbox: Inbox | None = None,
+                 crm_sync: bool = False, daily_cap: int | None = None) -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
@@ -126,6 +130,7 @@ class Orchestrator:
         self.transcripts, self.learn_from_replies = transcripts, learn_from_replies
         self.esign, self.handoff_channel = esign, handoff_channel
         self.customer_success_owner = customer_success_owner
+        self.inbox, self.crm_sync, self.daily_cap = inbox, crm_sync, daily_cap
         self.store = RunStore(conn)
 
     def _slots(self) -> tuple[Slot, ...]:
@@ -139,7 +144,7 @@ class Orchestrator:
                                 "'outbound' ORDER BY id DESC LIMIT 1", (deal_id,)).fetchone()
         return row[0] if row else None
 
-    # --- reading ----------------------------------------
+    # --- reading ----------------------------------------------------------------------------------
     def _deal(self, deal_id: UUID) -> dict[str, Any]:
         row = self.conn.cursor(row_factory=dict_row).execute(
             "SELECT d.*, c.full_name AS contact_name, co.name AS company_name, co.domain "
@@ -153,8 +158,11 @@ class Orchestrator:
         return self.packs[deal["segment_id"]]
 
     def policy_config(self, pack: Pack) -> PolicyConfig:
-        return PolicyConfig.from_pack(pack, demo_mode=self.demo_mode,
-                                      allowed_recipients=self.allowed_recipients)
+        config = PolicyConfig.from_pack(pack, demo_mode=self.demo_mode,
+                                        allowed_recipients=self.allowed_recipients)
+        if self.daily_cap is not None:                 # a real mailbox gets a lower cap than the pack's
+            config = replace(config, daily_cap=min(config.daily_cap, self.daily_cap))
+        return config
 
     def _tool_ctx(self, deal_id: UUID) -> ToolContext:
         def blocked(event: BlockEvent) -> None:
@@ -167,7 +175,7 @@ class Orchestrator:
         return ToolContext(self.ro_conn, self.packs, self.research, fixed_scope(self.ro_conn, deal_id),
                            blocked, quarantined)
 
-    # --- running an agent ----------------------------------------
+    # --- running an agent -------------------------------------------------------------------------
     def run_agent(self, deal_id: UUID, agent: str, step: str, *, input_: Mapping[str, Any] | None = None,
                   untrusted: Mapping[str, UntrustedText] | None = None,
                   slots: tuple[Slot, ...] = ()) -> RunResult:
@@ -221,7 +229,7 @@ class Orchestrator:
         return RunResult(row.id, row.agent, row.step, row.runner, row.status, row.human_reason,
                          row.output or {}, self.store.proposals(row.id))
 
-    # --- applying proposals ----------------------------------------
+    # --- applying proposals -----------------------------------------------------------------------
     def apply_run(self, run: RunResult, deal_id: UUID) -> list[dict[str, Any]]:
         """Turn each pending proposal into a policy decision and its effect. Safe to call twice."""
         applied = []
@@ -250,6 +258,7 @@ class Orchestrator:
         with self.conn.transaction():
             self._check_citations(deal, payload)
             request = self._policy_request(atype, deal, pack, payload)
+            payload = self._threaded(deal_id, atype, payload)
             proposal = propose_action(
                 self.conn, self.clock, self.policy_config(pack), key=key, request=request,
                 deal_id=deal_id, contact_id=UUID(contact_id) if contact_id else None,
@@ -280,6 +289,20 @@ class Orchestrator:
                 ("rejected" if rejected else "applied", action["id"], outcome, run.run_id, p["idx"]))
         return {"idx": p["idx"], "action_type": atype, "action_id": action["id"],
                 "status": action["status"], "outcome": outcome}
+
+    def _threaded(self, deal_id: UUID, atype: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Give a follow-up its place in the thread: In-Reply-To the message it answers (or our
+        last one), and References listing the thread so far, oldest first."""
+        if atype != "follow_up":
+            return payload
+        ids = [r[0] for r in self.conn.execute(
+            "SELECT message_id FROM messages WHERE deal_id = %s AND message_id IS NOT NULL ORDER BY id",
+            (deal_id,))]
+        if not ids:
+            return payload
+        reply_to = payload.get("in_reply_to") or ids[-1]
+        return {**payload, "in_reply_to": reply_to,
+                "references": [i for i in ids if i != reply_to][-9:] + [reply_to]}
 
     def _check_citations(self, deal: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
         """A lesson may be cited only if it is live and belongs to this segment or to everyone."""
@@ -347,7 +370,7 @@ class Orchestrator:
             record_event(self.conn, f"veto:{key}", "action.veto_expired",
                          {"action_id": str(action["id"])}, self.clock, run_at=action["veto_until"])
 
-    # --- internal effects ----------------------------------------
+    # --- internal effects -------------------------------------------------------------------------
     def _effect(self, atype: str, deal: Mapping[str, Any], pack: Pack, payload: dict[str, Any],
                 run: RunResult) -> None:
         deal_id = deal["id"]
@@ -499,7 +522,7 @@ class Orchestrator:
                               (deal["segment_id"], payload["text"], payload["evidence"],
                                list(payload.get("tags", [])), payload.get("source", "call")))
 
-    # --- stage moves: only here ----------------------------------------
+    # --- stage moves: only here -------------------------------------------------------------------
     def advance(self, deal_id: UUID, to_stage: DealStage, reason: str) -> bool:
         deal = self._deal(deal_id)
         current = DealStage(deal["stage"])
@@ -507,13 +530,15 @@ class Orchestrator:
             return False
         transition_deal(self.conn, deal_id, to_stage, actor="orchestrator", reason=reason,
                         exit_criteria=self._pack(deal).stages.exit_criteria)
+        self.sync_to_crm(deal_id)
         return True
 
-    # --- the slice: lead.created -> enrichment -> scoring -> outreach proposal -----------------------------
+    # --- the slice: lead.created -> enrichment -> scoring -> outreach proposal --------------------
     def handle_lead_created(self, deal_id: UUID) -> PipelineResult:
         runs: list[tuple[str, str]] = []
 
         def stop(status: str, reason: str | None, **kw: Any) -> PipelineResult:
+            self.sync_to_crm(deal_id)
             stage = self._deal(deal_id)["stage"]
             if status == "needs_human":
                 write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
@@ -551,7 +576,7 @@ class Orchestrator:
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
             return stop("needs_human", f"{cause_of(exc)}: {exc}")
 
-    # --- a person enters terms or approves a discount (agents cannot) ------------------------------------
+    # --- a person enters terms or approves a discount (agents cannot) -----------------------------
     def set_io_terms(self, deal_id: UUID, *, items: list[dict[str, Any]], start: str, end: str,
                      discount_pct: float, actor: str) -> None:
         self._merge_fields(deal_id, {"io_items": items, "io_start_date": start, "io_end_date": end,
@@ -566,7 +591,7 @@ class Orchestrator:
         write_audit(self.conn, manager, "deal.discount_approved", deal_id,
                     {"discount_pct": discount_pct, "reason": reason})
 
-    # --- the qualification gate ---------------------------------------------------------------------------
+    # --- the qualification gate -------------------------------------------------------------------
     def run_qualification_gate(self, deal_id: UUID) -> PipelineResult:
         """Check the pack's criteria for 'qualified'. The agent only suggests; the deal moves only
         through transition_deal, which checks the same criteria again."""
@@ -592,7 +617,7 @@ class Orchestrator:
         return PipelineResult("advanced", self._deal(deal_id)["stage"], self.runner.name,
                               runs=(("qualification", "completed"),))
 
-    # --- the IO ---------------------------------------------------------------------------------------------
+    # --- the IO -----------------------------------------------------------------------------------
     def handle_io(self, deal_id: UUID) -> PipelineResult:
         """Build and validate the IO, then let the policy engine decide about sending it."""
         deal = self._deal(deal_id)
@@ -696,7 +721,7 @@ class Orchestrator:
         return PipelineResult("completed", self._deal(deal_id)["stage"], self.runner.name,
                               action_id=action[0], decision=action[1])
 
-    # --- a call: transcript -> deal fields -> lessons --------------------------------------------------
+    # --- a call: transcript -> deal fields -> lessons ---------------------------------------------
     def handle_transcript(self, deal_id: UUID, transcript_id: str) -> PipelineResult:
         """Turn a finished call into deal fields (each with its quote) and lessons (each with its
         evidence). A transcript with an instruction in it is quarantined and teaches nothing."""
@@ -709,6 +734,10 @@ class Orchestrator:
         runs: list[tuple[str, str]] = []
 
         def done(status: str, reason: str | None = None) -> PipelineResult:
+            if status == "completed":
+                self._crm_note(deal_id, f"{deal_id}:callsummary:{transcript_id}", call_summary(
+                    transcript.title, clean_fields(self._deal(deal_id)["fields"] or {})))
+            self.sync_to_crm(deal_id)
             if status == "needs_human":
                 write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
                             {"runner": self.runner.name, "reason": reason, "transcript": transcript_id})
@@ -757,7 +786,7 @@ class Orchestrator:
     def sweep_lessons(self) -> list[lesson_loop.LessonChange]:
         return lesson_loop.sweep_no_replies(self.conn, self.clock)
 
-    # --- a customer reply ---------------------------------------------------------------------------------
+    # --- a customer reply -------------------------------------------------------------------------
     def handle_reply(self, deal_id: UUID, email: Any) -> PipelineResult:
         """Wrap, store, classify and route an inbound email. Flagged text is quarantined, never
         obeyed. A duplicate delivery of the same message does nothing."""
@@ -773,6 +802,7 @@ class Orchestrator:
 
         def done(status: str, reason: str | None = None, label: str | None = None,
                  **kw: Any) -> PipelineResult:
+            self.sync_to_crm(deal_id)
             if status == "needs_human":
                 write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
                             {"runner": self.runner.name, "reason": reason, "label": label})
@@ -810,13 +840,103 @@ class Orchestrator:
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
             return done("needs_human", f"{cause_of(exc)}: {exc}")
 
-    # --- sending ----------------------------------------
+    # --- HubSpot: its own actions, so a CRM failure never touches an email and vice versa ----------------
+    def _crm_action(self, deal_id: UUID, contact_id: UUID | None, key: str, type_: str,
+                    payload: dict[str, Any]) -> UUID | None:
+        pack = self._pack(self._deal(deal_id))
+        proposal = propose_action(self.conn, self.clock, self.policy_config(pack), key=key,
+                                  request=ActionRequest(type_), deal_id=deal_id, contact_id=contact_id,
+                                  payload=payload)
+        if not proposal.created:
+            return None
+        row = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT id, status, veto_until FROM actions WHERE id = %s", (proposal.action_id,)).fetchone()
+        self._queue_send(row, key)
+        return proposal.action_id
+
+    def sync_to_crm(self, deal_id: UUID) -> list[UUID]:
+        """Write the contact, company and deal (stage, score, tier, reason, outreach status, sequence
+        day, call fields with quotes, lessons cited) to the CRM. The key includes a hash of the
+        content, so nothing is queued unless something changed."""
+        if not self.crm_sync:
+            return []
+        deal = self._deal(deal_id)
+        fields = clean_fields(deal["fields"] or {})
+        lessons = [r[0] for r in self.conn.execute(
+            "SELECT DISTINCT lesson_id FROM lesson_uses WHERE deal_id = %s ORDER BY 1", (deal_id,))]
+        first = self.conn.execute(
+            "SELECT min(sent_at) FROM actions WHERE deal_id = %s AND type = 'first_touch' AND "
+            "status = 'sent'", (deal_id,)).fetchone()[0]
+        props = build_deal_properties(deal, fields, lessons)
+        props["revos_outreach_status"] = outreach_status(deal["stage"])
+        if (day := sequence_day(first, self.clock.now())) is not None:
+            props["revos_sequence_day"] = day
+        if deal["company_name"]:
+            props["dealname"] = deal["company_name"]
+        names = (deal["contact_name"] or "").split(" ", 1)
+        writes = [
+            ("contact", {"kind": "contacts", "properties": {"firstname": names[0], "lastname":
+                                                            names[1] if len(names) > 1 else ""}}),
+            ("company", {"kind": "companies", "domain": deal["domain"],
+                         "properties": {"name": deal["company_name"]}}) if deal["domain"] else None,
+            ("deal", {"kind": "deals", "stage": deal["stage"], "properties": props,
+                      "company_domain": deal["domain"]}),
+        ]
+        queued = []
+        for write in filter(None, writes):
+            name, payload = write
+            digest = canonical_hash(payload)
+            action_id = self._crm_action(deal_id, deal["contact_id"], f"{deal_id}:crm:{name}:{digest}",
+                                         "crm_update", payload)
+            if action_id:
+                queued.append(action_id)
+        return queued
+
+    def _crm_note(self, deal_id: UUID, key: str, text: str) -> None:
+        if self.crm_sync:
+            self._crm_action(deal_id, None, key, "crm_note", {"record_id": str(deal_id), "text": text})
+
+    # --- replies from the mailbox -----------------------------------------------------------------
+    def _deal_for_inbound(self, email: Any) -> UUID | None:
+        """Which deal an inbound message belongs to: the thread it answers, else the sender."""
+        ids = [i for i in (*(email.references or ()), email.in_reply_to) if i]
+        if ids:
+            row = self.conn.execute(
+                "SELECT deal_id FROM messages WHERE message_id = ANY(%s) AND deal_id IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1", (ids,)).fetchone()
+            if row:
+                return row[0]
+        row = self.conn.execute(
+            "SELECT d.id FROM deals d JOIN contacts c ON c.id = d.contact_id "
+            "WHERE lower(c.email) = %s AND d.stage NOT IN ('closed_lost', 'do_not_contact', 'handoff') "
+            "ORDER BY d.created_at DESC LIMIT 1", (email.from_addr.lower(),)).fetchone()
+        return row[0] if row else None
+
+    def poll_replies(self) -> list[PipelineResult]:
+        """Fetch replies (the inbox itself returns only replies to our messages or mail from an
+        allowlisted prospect), route each to its deal, handle it, and mark it delivered."""
+        if self.inbox is None:
+            return []
+        results = []
+        for email in self.inbox.poll():
+            deal_id = self._deal_for_inbound(email)
+            if deal_id is None:
+                write_audit(self.conn, "orchestrator", "inbound.unmatched", None,
+                            {"message_id": email.message_id})
+            else:
+                results.append(self.handle_reply(deal_id, email))
+            self.inbox.mark_processed(email.message_id)       # only after it was handled
+        return results
+
+    # --- sending ----------------------------------------------------------------------------------
     def send_action(self, action_id: UUID) -> GateResult:
         """Hand an approved action to the send gate. A first touch that goes out moves the deal."""
         row = self.conn.cursor(row_factory=dict_row).execute(
             "SELECT a.type, a.deal_id, d.segment_id FROM actions a JOIN deals d ON d.id = a.deal_id "
             "WHERE a.id = %s", (action_id,)).fetchone()
         pack = self.packs[row["segment_id"]]
+        if row["type"] == "crm_update" and self._superseded_crm_write(action_id):
+            return GateResult("refused", "a newer CRM write for this record replaces it")
         result = run_approved_action(self.conn, action_id, self.provider, self.clock,
                                      self.policy_config(pack))
         if result.status == "sent":
@@ -829,7 +949,25 @@ class Orchestrator:
                          {"action_id": str(action_id)}, self.clock, run_at=result.run_at)
         return result
 
+    def _superseded_crm_write(self, action_id: UUID) -> bool:
+        """A CRM write that waited out a retry must not overwrite a newer snapshot of the same
+        record (the stage going back from outreach to enriched). Each snapshot holds the whole
+        record, so a newer one replaces it; cancel the old one. Never touches mail."""
+        with self.conn.transaction():
+            row = self.conn.execute(
+                "UPDATE actions a SET status = 'cancelled' WHERE a.id = %s AND a.status = 'approved' "
+                "AND EXISTS (SELECT 1 FROM actions n WHERE n.deal_id = a.deal_id AND n.type = 'crm_update' "
+                "AND n.payload->>'kind' = a.payload->>'kind' AND n.status IN ('approved', 'sent') "
+                "AND (n.created_at, n.id) > (a.created_at, a.id)) RETURNING a.deal_id", (action_id,)
+            ).fetchone()
+            if row:
+                self.conn.execute("INSERT INTO audit_log (actor, event, deal_id, detail) VALUES "
+                                  "('orchestrator', 'crm.write_superseded', %s, %s)",
+                                  (row[0], Jsonb({"action_id": str(action_id)})))
+        return row is not None
+
     def _after_sent(self, kind: str, deal_id: UUID, action_id: UUID, provider_id: str | None) -> None:
+        self.sync_to_crm(deal_id)
         if kind == "first_touch":
             # only the first time: a repeated send job must never move a deal backwards
             if DealStage(self._deal(deal_id)["stage"]) is DealStage.SCORED:
@@ -882,6 +1020,8 @@ class Orchestrator:
                 "ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING",
                 (action["deal_id"], action["contact_id"], provider_id, payload.get("in_reply_to"),
                  payload.get("subject"), payload.get("body")))
+            self._crm_note(action["deal_id"], f"{action_id}:note",
+                           f"Email sent: {payload.get('subject')}\n\n{payload.get('body')}")
             slug = payload.get("case_study_id")
             if slug:
                 message = self.conn.execute("SELECT id FROM messages WHERE message_id = %s",
@@ -913,10 +1053,13 @@ class Orchestrator:
         def lessons_sweep(_conn: psycopg.Connection, job: Any) -> None:
             self.sweep_lessons()
 
+        def poll(_conn: psycopg.Connection, job: Any) -> None:
+            self.poll_replies()
+
         def signature_event(_conn: psycopg.Connection, job: Any) -> None:
             self.complete_signature(job.payload["envelope_id"])
 
-        return {"signature.event": signature_event, "lead.created": lead_created,
+        return {"email.poll": poll, "signature.event": signature_event, "lead.created": lead_created,
                 "action.send": send, "lessons.sweep": lessons_sweep,
                 "action.veto_expired": veto_expired, "lead.snooze_ended": snooze_ended,
                 "queue.release_held": release_held}

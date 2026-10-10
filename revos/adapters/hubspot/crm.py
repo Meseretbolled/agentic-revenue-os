@@ -213,8 +213,8 @@ class HubSpotCRM:
         payload, key = action["payload"], action["idempotency_key"]
         if action["type"] == "crm_note":
             hubspot_id = self.deal_id_for(str(payload["record_id"]))
-            if hubspot_id is None:
-                raise PermanentError("the deal is not in HubSpot yet, so a note cannot be added")
+            if hubspot_id is None:             # the deal write may simply not have landed yet: retry
+                raise HubSpotUnavailable("add note", "the deal is not in HubSpot yet")
             return self.add_note_to("deals", hubspot_id, str(payload["text"]), key)
         if action["type"] != "crm_update":
             raise PermanentError(f"HubSpot cannot perform {action['type']!r}")

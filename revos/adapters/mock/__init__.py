@@ -23,14 +23,15 @@ class MockWorld:
     research: MockResearch
     calendar: MockCalendar
 
+    def routes(self) -> dict:
+        return {"first_touch": self.mailer, "follow_up": self.mailer, "crm_update": self.crm,
+                "crm_note": self.crm, "send_io": self.esign, "book_meeting": self.calendar,
+                "handoff": self.chat}
+
     @property
     def router(self) -> ActionRouter:
         """The outbox provider: mail, CRM writes and e-signature, each to its own mock."""
-        return ActionRouter({
-            "first_touch": self.mailer, "follow_up": self.mailer,
-            "crm_update": self.crm, "crm_note": self.crm, "send_io": self.esign,
-            "book_meeting": self.calendar, "handoff": self.chat,
-        })
+        return ActionRouter(self.routes())
 
 
 def build_mock_world() -> MockWorld:

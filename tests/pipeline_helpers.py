@@ -36,15 +36,23 @@ def make_lead(conn, *, domain="brightside-optical.example", company="Brightside 
     return deal_id, contact_id
 
 
-def make_rig(conn, ro_conn, pack, clock, *, llm=None, world=None, runner=None, **lead) -> Rig:
+def make_rig(conn, ro_conn, pack, clock, *, llm=None, world=None, runner=None, mailer=None, inbox=None,
+             crm=None, crm_sync=False, daily_cap=None, allowed=(), **lead) -> Rig:
+    """`mailer`, `inbox` and `crm` replace the mocks (a fake Gmail, a fake HubSpot, ...)."""
+    from revos.adapters.router import ActionRouter
     world = world or build_mock_world()
     llm = llm or FakeLLM()
     deal_id, contact_id = make_lead(conn, **lead)
+    routes = world.routes()
+    for names, provider in ((("first_touch", "follow_up"), mailer), (("crm_update", "crm_note"), crm)):
+        for name in names if provider is not None else ():
+            routes[name] = provider
     orch = Orchestrator(
         conn, ro_conn, clock=clock, packs={pack.id: pack}, runner=runner or RulesRunner(llm),
-        research=world.research, provider=world.router, identity=Identity(),
-        demo_mode=True, allowed_recipients=frozenset({CONTACT_EMAIL, "owner@example.test"}),
-        calendar=world.calendar, transcripts=world.transcripts, esign=world.esign)
+        research=world.research, provider=ActionRouter(routes), identity=Identity(),
+        demo_mode=True, allowed_recipients=frozenset({CONTACT_EMAIL, "owner@example.test", *allowed}),
+        calendar=world.calendar, transcripts=world.transcripts, esign=world.esign, inbox=inbox,
+        crm_sync=crm_sync, daily_cap=daily_cap)
     return Rig(orch, world, llm, deal_id, contact_id)
 
 

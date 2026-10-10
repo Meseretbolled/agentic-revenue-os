@@ -49,10 +49,23 @@ class Worker:
 
 
 def main() -> None:
-    worker = Worker(handlers={}, clock=SystemClock())  # handlers are wired in later steps
-    with connect() as conn:
+    """The long-running worker: runs jobs and, every half minute, enqueues the scheduled events
+    (reply polling, stall scans, the kill-switch safety net)."""
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only
+    from revos.env import load_env_file
+    from revos.runtime.scheduler import tick
+
+    load_env_file()
+    clock = SystemClock()
+    with connect() as conn, connect_read_only() as ro:
         conn.autocommit = True
+        worker = Worker(build_orchestrator(conn, ro, clock).handlers(), clock)
+        last_tick = 0.0
         while True:
+            if time.monotonic() - last_tick >= 30:
+                tick(conn, clock)
+                last_tick = time.monotonic()
             if not worker.run_once(conn):
                 time.sleep(1)
 

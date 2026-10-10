@@ -55,7 +55,12 @@ class MockCRM:
     def perform(self, action: Mapping[str, Any]) -> str:
         payload = action["payload"]
         if action["type"] == "crm_update":
-            return self.upsert(payload["kind"], action["idempotency_key"], payload["properties"])
+            natural = {"deals": action.get("deal_id") and f"deal:{action['deal_id']}",
+                       "contacts": action.get("to_email") and f"contact:{action['to_email']}",
+                       "companies": payload.get("domain") and f"company:{payload['domain']}"
+                       }.get(payload["kind"])
+            props = {**payload["properties"], **({"stage": payload["stage"]} if payload.get("stage") else {})}
+            return self.upsert(payload["kind"], natural or action["idempotency_key"], props)
         if action["type"] == "crm_note":
             return self.add_note(action["idempotency_key"], payload["record_id"], payload["text"])
         raise ValueError(f"CRM cannot perform {action['type']!r}")

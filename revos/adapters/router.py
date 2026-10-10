@@ -20,6 +20,14 @@ class ActionRouter:
                 return hit
         return None
 
+    def find_for(self, action: Mapping[str, Any]) -> str | None:
+        """Ask only the provider that owns this action's type, so an outage at one provider (the
+        CRM) can never stop an action that belongs to another (the mail server)."""
+        provider = self._routes.get(action["type"])
+        if provider is None:
+            raise ValueError(f"no provider is registered for action type {action['type']!r}")
+        return provider.find(action["idempotency_key"])
+
     def perform(self, action: Mapping[str, Any]) -> str:
         provider = self._routes.get(action["type"])
         if provider is None:
