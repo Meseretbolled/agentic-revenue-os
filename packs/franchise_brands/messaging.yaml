@@ -48,8 +48,9 @@ templates:
 
       {{ personalised_line }}
 
-      {% if lesson %}{{ lesson.text }}
-      {% endif %}Happy to share more if it is useful.
+      {{ pillar.body }}
+
+      Happy to share more if it is useful.
 
       {{ sender_name }}
 

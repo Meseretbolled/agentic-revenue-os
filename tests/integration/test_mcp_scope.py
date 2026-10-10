@@ -105,7 +105,7 @@ def test_lessons_from_another_segment_are_refused_but_global_ones_are_not(conn, 
 
 def test_retired_lessons_are_not_returned(conn, world) -> None:
     _a, _b, ctx, _ = world
-    lesson = conn.execute("INSERT INTO lessons (text, evidence, retired_at) VALUES ('old', 'q', now()) "
+    lesson = conn.execute("INSERT INTO lessons (text, evidence, retired_at, retired_reason) VALUES ('old', 'q', now(), 'test') "
                           "RETURNING id").fetchone()[0]
     assert is_blocked(call(ctx, "outreach", "lessons.get", lesson_id=lesson))
     assert data(call(ctx, "outreach", "lessons.search", query="old"))["lessons"] == []

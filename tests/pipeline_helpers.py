@@ -22,17 +22,17 @@ class Rig:
 
 
 def make_lead(conn, *, domain="brightside-optical.example", company="Brightside Optical Group",
-              email=CONTACT_EMAIL, name="Sam Lee", fields="{}"):
+              email=CONTACT_EMAIL, name="Sam Lee", fields="{}", segment=PACK_ID):
     conn.execute("INSERT INTO segments (id, pack_version) VALUES (%s, '1') ON CONFLICT DO NOTHING",
-                 (PACK_ID,))
+                 (segment,))
     company_id = conn.execute("INSERT INTO companies (segment_id, name, domain) VALUES (%s, %s, %s) "
-                              "RETURNING id", (PACK_ID, company, domain)).fetchone()[0]
+                              "RETURNING id", (segment, company, domain)).fetchone()[0]
     contact_id = conn.execute("INSERT INTO contacts (company_id, email, full_name, timezone) "
                               "VALUES (%s, %s, %s, 'UTC') RETURNING id",
                               (company_id, email, name)).fetchone()[0]
     deal_id = conn.execute("INSERT INTO deals (segment_id, company_id, contact_id, fields) "
                            "VALUES (%s, %s, %s, %s) RETURNING id",
-                           (PACK_ID, company_id, contact_id, fields)).fetchone()[0]
+                           (segment, company_id, contact_id, fields)).fetchone()[0]
     return deal_id, contact_id
 
 
@@ -44,7 +44,7 @@ def make_rig(conn, ro_conn, pack, clock, *, llm=None, world=None, runner=None, *
         conn, ro_conn, clock=clock, packs={pack.id: pack}, runner=runner or RulesRunner(llm),
         research=world.research, provider=world.router, identity=Identity(),
         demo_mode=True, allowed_recipients=frozenset({CONTACT_EMAIL, "owner@example.test"}),
-        calendar=world.calendar)
+        calendar=world.calendar, transcripts=world.transcripts)
     return Rig(orch, world, llm, deal_id, contact_id)
 
 

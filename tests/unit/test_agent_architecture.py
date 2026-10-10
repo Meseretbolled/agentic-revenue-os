@@ -8,7 +8,7 @@ PROCEDURES = ["enrichment", "scoring", "outreach", "reply", "meeting", "call_int
               "qualification", "contract_io", "tracking", "knowledge"]
 # What an agent procedure may import from this repository.
 ALLOWED = ("revos.agents.common", "revos.agents.types", "revos.agents.outreach", "revos.domain",
-           "revos.skills", "revos.ports.llm")
+           "revos.skills", "revos.ports.llm", "revos.segments.schema")     # schema = plain config data
 FORBIDDEN_NAMES = {"conn", "execute", "transition_deal", "propose_action", "send_with_gate",
                    "execute_action", "run_approved_action", "write_audit", "record_event"}
 

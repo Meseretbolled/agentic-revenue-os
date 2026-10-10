@@ -1,14 +1,16 @@
 from datetime import datetime
 
 from revos.adapters.mock.fixtures import load
-from revos.ports.transcripts import Transcript
+from revos.ports.transcripts import Sentence, Transcript
 
 
 class MockTranscripts:
     def __init__(self) -> None:
         self._items = {
-            t["id"]: Transcript(t["id"], t["title"], t["text"], tuple(t["participants"]),
-                                datetime.fromisoformat(t["ended_at"]))
+            t["id"]: Transcript(
+                t["id"], t["title"], datetime.fromisoformat(t["date"]), tuple(t["participants"]),
+                tuple(Sentence(i, s["speaker_name"], s["text"], float(i), float(i) + 1)
+                      for i, s in enumerate(t["sentences"])))
             for t in load("transcripts")["transcripts"]
         }
         self.fetched: list[str] = []

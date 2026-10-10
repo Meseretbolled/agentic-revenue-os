@@ -47,6 +47,8 @@ from revos.ports.calendar import Calendar, Slot
 from revos.ports.clock import Clock
 from revos.ports.provider import ActionProvider
 from revos.ports.research import Research
+from revos.ports.transcripts import Transcripts
+from revos.runtime import lessons as lesson_loop
 from revos.runtime.events import record_event
 from revos.runtime.quarantine import record_quarantine
 from revos.segments.loader import Pack
@@ -64,7 +66,8 @@ HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
 INTERNAL = {"enrich", "score", "classify_reply", "suppress_contact", "cancel_scheduled_sends",
             "snooze_ooo", "reminder", "attach_case_study", "generate_io", "lesson_write"}
 SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note"}
-FIELD_PREFIXES = ("fact:", "fact_source:")
+FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
+EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role"}
 DEFAULT_SNOOZE_DAYS = 3        # no return date stated: look again after this long
 MAX_SNOOZE_DAYS = 14           # a stated date further out is cut back to this
 MAX_SNOOZES = 3                # after this many out-of-office replies a person looks
@@ -103,11 +106,13 @@ class Orchestrator:
                  packs: Mapping[str, Pack], runner: AgentRunner, research: Research,
                  provider: ActionProvider, identity: Identity | None = None, demo_mode: bool = True,
                  allowed_recipients: frozenset[str] = frozenset(),
-                 calendar: Calendar | None = None) -> None:
+                 calendar: Calendar | None = None, transcripts: Transcripts | None = None,
+                 learn_from_replies: bool = False) -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
         self.demo_mode, self.allowed_recipients, self.calendar = demo_mode, allowed_recipients, calendar
+        self.transcripts, self.learn_from_replies = transcripts, learn_from_replies
         self.store = RunStore(conn)
 
     def _slots(self) -> tuple[Slot, ...]:
@@ -230,6 +235,7 @@ class Orchestrator:
         atype = p["action_type"]
         key = f"{deal_id}:{run.step}:{p['idx']}"                  # deal id plus step, never random
         with self.conn.transaction():
+            self._check_citations(deal, payload)
             request = self._policy_request(atype, deal, pack, payload)
             proposal = propose_action(
                 self.conn, self.clock, self.policy_config(pack), key=key, request=request,
@@ -243,6 +249,11 @@ class Orchestrator:
                 self._effect(atype, deal, pack, payload, run)
             elif atype in SENDABLE and action["status"] in {"approved", "pending"}:
                 self._queue_send(action, key)
+            if payload.get("lesson_ids") and proposal.created:
+                write_audit(self.conn, "orchestrator", "lesson.cited", deal_id, {
+                    "action_id": str(action["id"]), "action_type": atype,
+                    "lesson_ids": payload["lesson_ids"], "angle": payload.get("angle"),
+                    "run": run.step})
             outcome = (proposal.decision.outcome.value if proposal.decision
                        else f"existing:{action['status']}")
             rejected = action["status"] == "cancelled"
@@ -252,6 +263,18 @@ class Orchestrator:
                 ("rejected" if rejected else "applied", action["id"], outcome, run.run_id, p["idx"]))
         return {"idx": p["idx"], "action_type": atype, "action_id": action["id"],
                 "status": action["status"], "outcome": outcome}
+
+    def _check_citations(self, deal: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
+        """A lesson may be cited only if it is live and belongs to this segment or to everyone."""
+        ids = [int(i) for i in payload.get("lesson_ids", [])]
+        if not ids:
+            return
+        valid = {r[0] for r in self.conn.execute(
+            "SELECT id FROM lessons WHERE id = ANY(%s) AND retired_at IS NULL AND "
+            "(segment_id IS NULL OR segment_id = %s)", (ids, deal["segment_id"])).fetchall()}
+        if set(ids) - valid:
+            raise ProposalRejected("cites lesson(s) that are retired, unknown or from another "
+                                   "segment: " + ", ".join(str(i) for i in sorted(set(ids) - valid)))
 
     def _policy_request(self, atype: str, deal: Mapping[str, Any], pack: Pack,
                         payload: Mapping[str, Any]) -> ActionRequest:
@@ -301,8 +324,8 @@ class Orchestrator:
                 run: RunResult) -> None:
         deal_id = deal["id"]
         if atype == "enrich":
-            allowed = set(pack.scoring.lead_fields) | set(pack.stages.qualification_fields) | {
-                "company_domain"}
+            allowed = set(pack.scoring.lead_fields) | set(pack.stages.qualification_fields) \
+                | EXTRA_FIELDS
             props = dict(payload["properties"])
             bad = [k for k in props if k not in allowed and not k.startswith(FIELD_PREFIXES)]
             if bad:
@@ -324,6 +347,7 @@ class Orchestrator:
                                   (payload["label"], payload["message_id"]))
             write_audit(self.conn, "orchestrator", "reply.classified", deal_id,
                         {"label": payload["label"], "confidence": payload["confidence"]})
+            self._learn_from_reply(deal, payload["label"])
         elif atype in {"suppress_contact", "cancel_scheduled_sends"}:
             self._opt_out(deal, atype, payload)
         elif atype == "attach_case_study":
@@ -342,6 +366,20 @@ class Orchestrator:
             self._snooze(deal, payload)
         else:                                                   # reminder
             write_audit(self.conn, "orchestrator", f"agent.{atype}", deal_id, dict(payload))
+
+    def _learn_from_reply(self, deal: Mapping[str, Any], label: str) -> None:
+        deal_id = deal["id"]
+        if label in {"price_objection", "question"}:
+            self.conn.execute(
+                "UPDATE deals SET fields = jsonb_set(fields, '{open_objections}', "
+                "coalesce(fields->'open_objections', '[]'::jsonb) || to_jsonb(%s::text)) "
+                "WHERE id = %s AND NOT coalesce(fields->'open_objections', '[]'::jsonb) ? %s",
+                (label, deal_id, label))
+        outcome = {"interested": "reply_positive", "question": "reply_positive",
+                   "price_objection": "reply_positive", "referral": "reply_positive",
+                   "not_interested": "reply_negative", "unsubscribe": "reply_negative"}.get(label)
+        if outcome:                     # an out-of-office is not a person's answer: no outcome
+            lesson_loop.record_outcome(self.conn, deal_id, outcome, self.clock)
 
     def _snooze(self, deal: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
         """Pause the lead until the stated return date, bounded, and wake it up with a timer."""
@@ -426,10 +464,10 @@ class Orchestrator:
         same = self.conn.execute("SELECT 1 FROM lessons WHERE segment_id = %s AND lower(text) = lower(%s)",
                                  (deal["segment_id"], payload["text"])).fetchone()
         if same is None:
-            self.conn.execute("INSERT INTO lessons (segment_id, text, evidence, tags) "
-                              "VALUES (%s, %s, %s, %s)",
+            self.conn.execute("INSERT INTO lessons (segment_id, text, evidence, tags, source) "
+                              "VALUES (%s, %s, %s, %s, %s)",
                               (deal["segment_id"], payload["text"], payload["evidence"],
-                               list(payload.get("tags", []))))
+                               list(payload.get("tags", [])), payload.get("source", "call")))
 
     # --- stage moves: only here ----------------------------------------
     def advance(self, deal_id: UUID, to_stage: DealStage, reason: str) -> bool:
@@ -483,6 +521,59 @@ class Orchestrator:
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
             return stop("needs_human", f"{cause_of(exc)}: {exc}")
 
+    # --- a call: transcript -> deal fields -> lessons --------------------------------------------------
+    def handle_transcript(self, deal_id: UUID, transcript_id: str) -> PipelineResult:
+        """Turn a finished call into deal fields (each with its quote) and lessons (each with its
+        evidence). A transcript with an instruction in it is quarantined and teaches nothing."""
+        if self.transcripts is None:
+            raise LookupError("no transcript source is configured")
+        transcript = self.transcripts.get(transcript_id)
+        if transcript is None:
+            raise LookupError(f"no transcript {transcript_id}")
+        text = UntrustedText.wrap("transcript", transcript.id, transcript.text)
+        runs: list[tuple[str, str]] = []
+
+        def done(status: str, reason: str | None = None) -> PipelineResult:
+            if status == "needs_human":
+                write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
+                            {"runner": self.runner.name, "reason": reason, "transcript": transcript_id})
+            return PipelineResult(status, self._deal(deal_id)["stage"], self.runner.name, reason,
+                                  runs=tuple(runs))
+
+        try:
+            run = self.run_agent(deal_id, "call_intel", f"call:{transcript_id}",
+                                 untrusted={"transcript": text})
+            runs.append(("call_intel", run.status))
+            if run.status != "completed":
+                return done("needs_human", run.human_reason)
+            self.apply_run(run, deal_id)
+            quotes = run.proposals[0]["payload"].get("quotes", {}) if run.proposals else {}
+            for name in ("objections", "needs"):
+                if name in quotes:
+                    self._learn(deal_id, f"know:{transcript_id}:{name}", quotes[name],
+                                f"{transcript_id}#{name}", "call", runs)
+            return done("completed")
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            return done("needs_human", f"{cause_of(exc)}: {exc}")
+
+    def _learn(self, deal_id: UUID, step: str, quote: str, origin: str, source: str,
+               runs: list[tuple[str, str]]) -> None:
+        candidate = UntrustedText.wrap("transcript", origin, quote)
+        run = self.run_agent(deal_id, "knowledge", step, input_={"source": source},
+                             untrusted={"candidate": candidate})
+        runs.append(("knowledge", run.status))
+        if run.status == "completed":
+            self.apply_run(run, deal_id)
+
+    def record_meeting_booked(self, deal_id: UUID) -> list[lesson_loop.LessonChange]:
+        """A meeting is booked: the best outcome for every lesson used on this deal so far."""
+        changes = lesson_loop.record_outcome(self.conn, deal_id, "meeting", self.clock)
+        self.advance(deal_id, DealStage.MEETING, "a meeting was booked")
+        return changes
+
+    def sweep_lessons(self) -> list[lesson_loop.LessonChange]:
+        return lesson_loop.sweep_no_replies(self.conn, self.clock)
+
     # --- a customer reply ---------------------------------------------------------------------------------
     def handle_reply(self, deal_id: UUID, email: Any) -> PipelineResult:
         """Wrap, store, classify and route an inbound email. Flagged text is quarantined, never
@@ -526,6 +617,9 @@ class Orchestrator:
                 if meeting.status != "completed":
                     return done("needs_human", meeting.human_reason, label)
                 self.apply_run(meeting, deal_id)
+            if self.learn_from_replies and label in {"price_objection", "not_interested"}:
+                self._learn(deal_id, f"know:{email.message_id}", email.body, email.message_id,
+                            "reply", runs)
             if run.output.get("handoff"):
                 return done("needs_human", run.output["handoff"], label)
             return done("completed", None, label)
@@ -543,6 +637,7 @@ class Orchestrator:
                                      self.policy_config(pack))
         if result.status == "sent":
             self._record_sent_email(action_id, result.provider_id, pack)
+            self._record_lesson_uses(action_id)
         if result.status == "sent" and row["type"] == "first_touch":
             self.advance(row["deal_id"], DealStage.OUTREACH, "first touch sent")
         elif result.status == "deferred" and result.run_at:
@@ -559,6 +654,19 @@ class Orchestrator:
             "source_url = EXCLUDED.source_url RETURNING id",
             (pack.id, slug, study.customer, study.tags, study.metric_text, study.source_url,
              study.label)).fetchone()[0]
+
+    def _record_lesson_uses(self, action_id: UUID) -> None:
+        action = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT deal_id, payload FROM actions WHERE id = %s", (action_id,)).fetchone()
+        ids = [int(i) for i in action["payload"].get("lesson_ids", [])]
+        if ids:
+            lesson_loop.record_use(self.conn, ids, action["deal_id"], action_id, self.clock)
+        if action["payload"].get("template") == "case_study_reply":     # that objection is answered
+            self.conn.execute(
+                "UPDATE deals SET fields = jsonb_set(fields, '{open_objections}', "
+                "coalesce((SELECT jsonb_agg(v) FROM jsonb_array_elements(coalesce(fields->"
+                "'open_objections', '[]'::jsonb)) v WHERE v <> '\"price_objection\"'::jsonb), "
+                "'[]'::jsonb)) WHERE id = %s", (action["deal_id"],))
 
     def _record_sent_email(self, action_id: UUID, provider_id: str | None, pack: Pack) -> None:
         """Keep our own copy of what went out, and which case study (if any) it carried."""
@@ -603,7 +711,10 @@ class Orchestrator:
         def release_held(_conn: psycopg.Connection, job: Any) -> None:
             release_held_sends(self.conn, self.clock)
 
-        return {"lead.created": lead_created, "action.send": send,
+        def lessons_sweep(_conn: psycopg.Connection, job: Any) -> None:
+            self.sweep_lessons()
+
+        return {"lead.created": lead_created, "action.send": send, "lessons.sweep": lessons_sweep,
                 "action.veto_expired": veto_expired, "lead.snooze_ended": snooze_ended,
                 "queue.release_held": release_held}
 

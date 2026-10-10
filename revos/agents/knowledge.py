@@ -22,6 +22,7 @@ def run(env: AgentEnv) -> AgentOutput:
             return AgentOutput(notes=f"duplicate of lesson L{existing['id']}")
     proposal = make("lesson_write", env.deal_id, env.contact_id, {
         "text": draft.text, "tags": list(draft.tags),
-        "evidence": candidate.for_human()["text"], "origin": candidate.origin},
+        "evidence": candidate.for_human()["text"], "origin": candidate.origin,
+        "source": env.input.get("source", "call")},
         [], "a new lesson backed by a customer quote")
     return AgentOutput((proposal,))

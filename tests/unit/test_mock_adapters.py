@@ -124,10 +124,17 @@ def test_chat_records_posts_and_finds_them_by_key(world) -> None:
 
 
 def test_transcripts_serve_the_fictional_call(world) -> None:
-    assert world.transcripts.list_ready() == ["call-001"]
+    assert world.transcripts.list_ready() == ["call-001", "call-002"]
     t = world.transcripts.get("call-001")
     assert "budget is about fifty thousand" in t.text and world.transcripts.get("nope") is None
     assert world.transcripts.fetched == ["call-001", "nope"]
+    # shaped like Fireflies: title, date, participants, sentences with speaker_name and text
+    assert t.title.startswith("Discovery call") and t.date.year == 2026
+    assert t.participants == ("Jo Rivers", "Sam Lee")
+    first = t.sentences[0]
+    assert (first.index, first.speaker_name) == (0, "Jo Rivers") and first.text.startswith("Thanks")
+    assert t.text.splitlines()[1] == "Sam Lee: We need local campaigns for all our practices " \
+        "without every owner redoing the creative."
 
 
 def test_research_search_and_fetch(world) -> None:

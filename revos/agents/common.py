@@ -71,3 +71,11 @@ def make(action_type: str, deal_id: UUID, contact_id: UUID | None, payload: Mapp
 
 def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.casefold()).strip("_")
+
+
+def lesson_query(fields: Mapping[str, Any]) -> tuple[str, list[str]]:
+    """(keywords, tags) to retrieve lessons by: the industry, the needs and objections on record."""
+    plain = clean_fields(fields)
+    parts = [str(plain.get(k)) for k in ("industry", "needs", "objections") if plain.get(k)]
+    parts += [str(x).replace("_", " ") for x in plain.get("open_objections", [])]
+    return " ".join(parts), match_tags(fields)

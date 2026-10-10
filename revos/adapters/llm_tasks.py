@@ -63,9 +63,11 @@ def draft_prompt(request: DraftRequest) -> str:
     evidence = "\n".join(f"{i.id}: {i.text}" for i in request.evidence.items.values())
     feedback = ("\nFix these problems from the last attempt:\n- " + "\n- ".join(request.feedback)
                 if request.feedback else "")
+    angle = (f"\nLead with this angle, as an angle only (never as a new fact): "
+             f"{request.context['angle']}" if request.context.get("angle") else "")
     return (f"Write ONE short personalised line for {request.context.get('first_name', 'the contact')} "
             f"at {request.context.get('company', 'their company')}. Use only facts from the evidence "
-            f"below; do not add numbers, dates or names that are not in it.\n"
+            f"below; do not add numbers, dates or names that are not in it.{angle}\n"
             f"Evidence:\n{evidence}{feedback}\n"
             'Return {"personalised_line": str, "claims": [{"text": exact words from the line, '
             '"evidence": [ids]}]}')
