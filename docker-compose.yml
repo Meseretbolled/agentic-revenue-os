@@ -1,0 +1,42 @@
+# Host ports: API 8100, Postgres 5434 (8000 and 8012 belong to other containers).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: revos
+      POSTGRES_PASSWORD: revos
+      POSTGRES_DB: revos
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - revos_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U revos -d revos"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    profiles: ["app"]
+    command: uvicorn revos.api.main:app --host 0.0.0.0 --port 8100
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://revos:revos@db:5432/revos
+    ports:
+      - "${APP_PORT:-8100}:8100"
+    depends_on:
+      db: {condition: service_healthy}
+
+  worker:
+    build: .
+    profiles: ["app"]
+    command: python -m revos.runtime.worker
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://revos:revos@db:5432/revos
+    depends_on:
+      db: {condition: service_healthy}
+
+volumes:
+  revos_pgdata:

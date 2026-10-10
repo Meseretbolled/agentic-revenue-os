@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "revos"
+version = "0.1.0"
+description = "Agentic Revenue OS: AI agents that run the revenue lifecycle, built on the Claude Agent SDK"
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk",
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "alembic",
+    "pydantic>=2",
+    "pyyaml",
+    "jinja2",
+    "httpx",
+    "typer",
+    "rich",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+revos = "revos.cli.main:app"
+
+[tool.setuptools.packages.find]
+include = ["revos*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["db: needs the Postgres container (docker compose up -d db)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
