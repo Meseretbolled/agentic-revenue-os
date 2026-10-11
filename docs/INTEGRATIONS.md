@@ -141,6 +141,54 @@ get its contact write refused (a permanent error, in the dead-letter list) while
 deal writes still go through; for a real HubSpot run, give demo contacts a valid-looking address
 such as the prospect test inbox.
 
+## The IO and Dropbox Sign (test mode only)
+
+**Test mode is enforced in code**: the adapter refuses any request with `test_mode` off before touching the
+network, always sends `test_mode=1`, and cancels and refuses a created request whose response does not say
+`test_mode: true`. Nothing in the app can send a live request.
+
+What the docs say, and what was **seen live** on the owner's free account:
+
+* Auth is HTTP Basic with the API key as the user and an empty password (`GET /v3/account` answered 200).
+* `POST /v3/signature_request/send` with multipart form fields `files[0]`, `signers[0][email_address]`,
+  `signers[0][name]`, `metadata[...]`, `test_mode=1` created a request (the docs describe a JSON body but a PDF
+  has to travel as multipart; this encoding worked).
+* **Free-plan limit seen live**: "In test mode, you can only send emails to your own email address." The signer
+  must be the account's own address exactly; a plus-variant of it was refused (403). For the free account the
+  signer on the lead record is therefore the account email (the sender inbox, which is on the recipient
+  allowlist): `revos seed <tag> --profile hot --signer-email sender`. A paid plan lifts this.
+* Metadata is stored as sent. Searching `metadata:<value>` finds a request but **the search index lagged**
+  (not found for about a minute); the plain list shows a new request at once, so the adapter checks both.
+  Even so "not found" is not proof it was never created, so it is treated as "cannot tell".
+* Callbacks (per the docs): multipart/form-data with the event in a field named `json`; `event.event_hash` is
+  HMAC-SHA256 (hex) over `event_time + event_type` keyed with the API key; the receiver must answer HTTP 200 with
+  a body containing `Hello API Event Received` or the delivery is resent. The docs do not describe a
+  `callback_test` event beyond the UI's test button, so a verified event of that type is acknowledged and ignored.
+  The hash covers only the time and the type, not the signature request id, so the id in an event is not
+  authenticated by it: the deal closes only when the provider's own API says the request is complete.
+* The account callback URL is set by hand: Dropbox Sign account, Settings, API, Account callback:
+  `PUBLIC_BASE_URL/dropboxsign/webhook`. (On the owner's account it was unset.)
+
+How the IO is built and sent:
+
+* **Only for a deal at `qualified`.** Fields: advertiser, signer name, title and email (the email from the lead
+  record's `signer_email`, on the allowlist; never from a call or a payload), the budget with its call quote,
+  term, start date, discount and payment terms. Validated in code: required fields, prices against the SAMPLE rate
+  card, the budget inside the pack's bounds, a maximum term, and the discount. **A discount over the pack
+  maximum is a hard block that never sends and cannot be overridden by anyone** (the earlier "manager approval"
+  override was removed).
+* The IO is rendered to a PDF (fpdf2, no network), attached alone, and sent in test mode. The action follows the
+  pack's autonomy level (the Slack veto when `auto_with_veto`).
+* **Check before retry**: the attempt is written to `esign_attempts` on its own connection before the create call,
+  our key goes in the request metadata, and the signature request id is kept in the outbox. Before any retry the
+  provider is asked about our key; if it cannot be told whether a request was created the action goes to review
+  (`esign.review_required`) and is **not** sent again.
+* **Webhook** `POST /dropboxsign/webhook`: verified exactly as above (401 otherwise, audited without the body),
+  deduplicated by `signature_request_id + event_type + event_time`, sent/viewed/signed audited, and
+  `signature_request_all_signed` closes the deal through `transition_deal()`, updates HubSpot (stage,
+  `closedate`, `amount`, `revos_signature_request_id`, a note with the id) and posts the handoff to Slack.
+* Not built: the fallback signing page, because the real API and callback could be used on the owner's account.
+
 ## Fireflies (call intelligence)
 
 **Status: the real GraphQL adapter is built and tested against a fake server; the live calls are described
@@ -239,8 +287,7 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
 * **Real by default**: keys in `.env` select the real adapter, missing keys select the mock. With a
   key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
   fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
-* **Not built yet, so MOCK even with a key**: Dropbox Sign
-  (Step 12), Tavily. For these, `revos doctor` and the banner say `key OK, adapter not built yet:
+* **Not built yet, so MOCK even with a key**: Tavily. For these, `revos doctor` and the banner say `key OK, adapter not built yet:
   runs as MOCK` (or `key NOT working (...)`) instead of `REAL OK`.
 * **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
   distinct HubSpot contact (HubSpot merges by email and refuses `.test` and `.example`), and every
@@ -353,7 +400,7 @@ value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dr
 | Slack | `auth.test`; also notes a missing `SLACK_SIGNING_SECRET` | REAL OK; a real post and in-place update succeeded |
 | Gmail | IMAP login and logout only | REAL OK (owner's run) |
 | Fireflies | GraphQL `{ user { user_id } }` | REAL OK; the transcript adapter is built (see the Fireflies section) |
-| Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | REAL OK (owner's run) |
+| Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | REAL OK; a test-mode request was created and cancelled live (see its section) |
 | Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | our call matches Tavily's documented shape; the owner's key was answered 403, which doctor now reports as `key rejected` (check or regenerate the key) |
 | Tunnel URL | `GET <PUBLIC_BASE_URL>/healthz` | unverified live |
 

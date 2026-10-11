@@ -1,6 +1,7 @@
 """Recurring events. Each tick's key includes the time bucket, so ticking twice in the same
 bucket (two schedulers, a restart) cannot create a duplicate."""
 
+import os
 from dataclasses import dataclass
 
 import psycopg
@@ -25,12 +26,22 @@ DEFAULT_SCHEDULES: tuple[Schedule, ...] = (
 )
 
 
+def with_overrides(schedules: tuple[Schedule, ...]) -> tuple[Schedule, ...]:
+    """CALLS_POLL_SECONDS shortens the Fireflies poll for a demo (never below 30 seconds)."""
+    raw = os.environ.get("CALLS_POLL_SECONDS", "").strip()
+    if not raw.isdigit():
+        return schedules
+    seconds = max(30, int(raw))
+    return tuple(Schedule(s.event_type, seconds) if s.event_type == "calls.poll" else s for s in schedules)
+
+
 def tick(
     conn: psycopg.Connection,
     clock: Clock,
-    schedules: tuple[Schedule, ...] = DEFAULT_SCHEDULES,
+    schedules: tuple[Schedule, ...] | None = None,
 ) -> list[str]:
     """Enqueue the current bucket of each schedule. Returns the keys that were new."""
+    schedules = schedules if schedules is not None else with_overrides(DEFAULT_SCHEDULES)
     created = []
     now = clock.now()
     for sched in schedules:

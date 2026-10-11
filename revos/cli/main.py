@@ -419,8 +419,12 @@ def seed(
     domain: str = typer.Option("brightside-optical.example", help="its (fictional) web domain"),
     contact: str = typer.Option("Sam Lee", help="a fictional contact name"),
     segment: str = typer.Option(None, help="the segment pack (default: the demo pack)"),
+    signer_email: str = typer.Option(None, "--signer-email", help="the signer's address on the lead record "
+                                     "(default: a plus-address of PROSPECT_TEST_EMAIL; 'sender' means "
+                                     "GMAIL_ADDRESS, which a free Dropbox Sign account in test mode needs)"),
 ) -> None:
     """Create one fictional lead addressed to a plus-address of PROSPECT_TEST_EMAIL and queue it."""
+    import os
     from pathlib import Path
 
     from revos.adapters.clock import SystemClock
@@ -451,6 +455,10 @@ def seed(
                                          if chosen.get("research_notes") else {})}
         if chosen.get("signer_email_tag"):
             fields["signer_email"] = demo_address(chosen["signer_email_tag"])      # the lead record's signer
+        if signer_email:
+            fields["signer_email"] = (os.environ.get("GMAIL_ADDRESS", "").strip().lower()
+                                      if signer_email.strip().lower() == "sender"
+                                      else signer_email.strip().lower())
         timezone = chosen.get("timezone")
     with connect() as conn:
         conn.autocommit = True

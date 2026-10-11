@@ -70,10 +70,12 @@ class MockESign:
         try:
             event = payload["event"]
             kind, when, given = event["event_type"], str(event["event_time"]), str(event["event_hash"])
-            envelope = payload["signature_request"]["signature_request_id"]
-        except (KeyError, TypeError) as exc:
+            envelope = (payload.get("signature_request") or {}).get("signature_request_id") or ""
+        except (KeyError, TypeError, AttributeError) as exc:
             raise WebhookRejected("the webhook body is not in the expected shape") from exc
         if not hmac.compare_digest(given, self._hash(when, kind)):
             raise WebhookRejected("the webhook signature does not verify")
+        if not envelope and kind != "callback_test":
+            raise WebhookRejected("the webhook names no signature request")
         return SignatureEvent(f"{envelope}:{kind}:{when}", EVENT_KINDS.get(kind, "other"), str(envelope),
                               datetime.fromtimestamp(int(when), UTC), kind)

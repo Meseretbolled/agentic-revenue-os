@@ -116,22 +116,27 @@ class DropboxSignAdapter:
             raise TestModeViolation("Dropbox Sign did not confirm test mode for the request just created")
         return sid
 
-    def find_by_key(self, idempotency_key: str) -> str | None:
-        """The id of the request carrying our key in its metadata, if the search can see it. A newly created
-        request may not be searchable immediately (documented), so None is NOT proof it was never created."""
-        token = key_token(idempotency_key)
+    def _scan(self, token: str, query: str | None) -> str | None:
         page = 1
-        while page <= 5:
-            body = self._request("search", "GET", "/signature_request/list",
-                                 params={"query": f"metadata:{token}", "page": page, "page_size": 100})
+        while page <= 3:
+            params: dict[str, Any] = {"page": page, "page_size": 100}
+            if query:
+                params["query"] = query
+            body = self._request("search", "GET", "/signature_request/list", params=params)
             for item in body.get("signature_requests") or []:
                 if (item.get("metadata") or {}).get(METADATA_KEY) == token:
                     return str(item["signature_request_id"])
-            info = body.get("list_info") or {}
-            if page >= int(info.get("num_pages") or 1):
+            if page >= int((body.get("list_info") or {}).get("num_pages") or 1):
                 break
             page += 1
         return None
+
+    def find_by_key(self, idempotency_key: str) -> str | None:
+        """The id of the request carrying our key in its metadata. Seen live: the search index can lag a
+        minute or more behind a new request, but the plain list shows it at once, so both are used. Even so
+        None is not proof it was never created: the caller treats "cannot tell" as review, never as "send"."""
+        token = key_token(idempotency_key)
+        return self._scan(token, f"metadata:{token}") or self._scan(token, None)
 
     def get(self, envelope_id: str) -> dict[str, Any]:
         return (self._request("get", "GET", f"/signature_request/{envelope_id}").get("signature_request")
