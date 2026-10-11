@@ -14,16 +14,37 @@ from revos.modes import integration_modes
 from revos.obs import log
 from revos.slack.interactions import BadSignature, SlackInteractions, parse_press, verify_signature
 
+# What the public tunnel may reach: the two signed webhooks and the bare health check. Everything else
+# (status, docs, the OpenAPI schema, any future route) answers 404 unless the request is local.
+PUBLIC_ROUTES = frozenset({("POST", "/slack/interactions"), ("POST", "/dropboxsign/webhook"),
+                           ("GET", "/healthz")})
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "[::1]"})
+
+
+def _via_tunnel(request: Request) -> bool:
+    """Fail closed: anything that is not plainly a local request counts as public. The tunnel sends a
+    non-local Host and Cloudflare headers, so a request through it is never mistaken for a local one."""
+    host = request.headers.get("host", "")
+    name = host if host.startswith("[") else host.rsplit(":", 1)[0]
+    name = name.split("]")[0] + "]" if host.startswith("[") else name
+    return name not in _LOCAL_HOSTS or "cf-ray" in request.headers or "cf-connecting-ip" in request.headers
+
 
 def create_app(interactions: SlackInteractions | None = None,
                signing_secret: Callable[[], str] | str = "",
                signatures: SignatureWebhook | None = None) -> FastAPI:
-    app = FastAPI(title="Agentic Revenue OS")
+    app = FastAPI(title="Agentic Revenue OS", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.interactions = interactions
     app.state.signatures = signatures
 
     def secret() -> str:
         return signing_secret() if callable(signing_secret) else signing_secret
+
+    @app.middleware("http")
+    async def public_allowlist(request: Request, call_next):
+        if _via_tunnel(request) and (request.method, request.url.path) not in PUBLIC_ROUTES:
+            return Response(status_code=404)
+        return await call_next(request)
 
     @app.middleware("http")
     async def access_log(request: Request, call_next):
