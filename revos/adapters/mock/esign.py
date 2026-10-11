@@ -7,6 +7,10 @@ from typing import Any, Literal
 from revos.domain.errors import WebhookRejected
 from revos.ports.esign import SignatureEvent, SignatureRequest
 
+EVENT_KINDS = {"signature_request_sent": "sent", "signature_request_viewed": "viewed",
+               "signature_request_signed": "signed", "signature_request_all_signed": "all_signed",
+               "callback_test": "test"}
+
 
 class MockESign:
     """Test mode only, like the Dropbox Sign account: a live request is refused."""
@@ -18,7 +22,7 @@ class MockESign:
         self._signed: set[str] = set()
 
     def send(self, request: SignatureRequest) -> str:
-        if not request.test_mode:
+        if request.test_mode is not True:
             raise ValueError("e-signature is limited to test mode")
         self.requests.append(request)
         envelope = f"env-{len(self._by_key) + 1}"
@@ -71,6 +75,5 @@ class MockESign:
             raise WebhookRejected("the webhook body is not in the expected shape") from exc
         if not hmac.compare_digest(given, self._hash(when, kind)):
             raise WebhookRejected("the webhook signature does not verify")
-        return SignatureEvent(f"{envelope}:{kind}:{when}",
-                              "all_signed" if kind == "signature_request_all_signed" else "other",
-                              str(envelope), datetime.fromtimestamp(int(when), UTC))
+        return SignatureEvent(f"{envelope}:{kind}:{when}", EVENT_KINDS.get(kind, "other"), str(envelope),
+                              datetime.fromtimestamp(int(when), UTC), kind)

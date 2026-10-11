@@ -44,6 +44,13 @@ def build_deal_properties(deal: Mapping[str, Any], fields: Mapping[str, Any],
             props[f"revos_call_{name}"] = fields[name]
         if fields.get(f"quote:{name}"):
             props[f"revos_call_{name}_quote"] = fields[f"quote:{name}"]
+    if fields.get("envelope_id"):
+        props["revos_signature_request_id"] = str(fields["envelope_id"])
+    if fields.get("signed_at"):                  # the close: when, and for how much
+        props["revos_signed_at"] = str(fields["signed_at"])
+        props["closedate"] = str(fields["signed_at"])
+        if fields.get("io_total") is not None:
+            props["amount"] = str(fields["io_total"])
     if lesson_ids:
         props["revos_lesson_ids"] = ",".join(f"L{i}" for i in lesson_ids)
     return props

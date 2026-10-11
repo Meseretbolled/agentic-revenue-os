@@ -55,6 +55,10 @@ def fireflies_configured(env: Mapping[str, str] | None = None) -> bool:
     return _has(os.environ if env is None else env, "FIREFLIES_API_KEY")
 
 
+def dropbox_sign_configured(env: Mapping[str, str] | None = None) -> bool:
+    return _has(os.environ if env is None else env, "DROPBOX_SIGN_API_KEY")
+
+
 def llm_live(env: Mapping[str, str] | None = None) -> bool:
     env = os.environ if env is None else env
     return env.get("LLM_MODE", "fake") == "live" and _has(env, "ANTHROPIC_API_KEY")
@@ -78,7 +82,8 @@ def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
         Mode("Gmail", REAL if gmail_keys(env) else MOCK, "" if gmail_keys(env) else "no key"),
         Mode("Fireflies", REAL if fireflies_configured(env) else MOCK,
              "" if fireflies_configured(env) else "no key"),
-        not_built("Dropbox Sign", "DROPBOX_SIGN_API_KEY", "Step 12"),
+        Mode("Dropbox Sign", REAL if dropbox_sign_configured(env) else MOCK,
+             "TEST MODE only" if dropbox_sign_configured(env) else "no key"),
         not_built("Tavily", "TAVILY_API_KEY", "a later step"),
         Mode("Tunnel URL", REAL if _has(env, "PUBLIC_BASE_URL") else MOCK, "" if _has(env, "PUBLIC_BASE_URL")
              else "PUBLIC_BASE_URL is not set: Slack buttons will not work"),

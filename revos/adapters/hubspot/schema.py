@@ -46,6 +46,8 @@ PROPERTIES: dict[str, list[PropertySpec]] = {
         PropertySpec("revos_outreach_status", "Revos outreach status", "text"),
         PropertySpec("revos_sequence_day", "Revos sequence day", "number"),
         PropertySpec("revos_lesson_ids", "Revos lessons cited", "text"),
+        PropertySpec("revos_signature_request_id", "Revos signature request id", "text"),
+        PropertySpec("revos_signed_at", "Revos signed at", "text"),
         *[PropertySpec(f"revos_call_{name}", f"Revos call: {name.replace('_', ' ')}", "textarea")
           for name in CALL_FIELDS],
         *[PropertySpec(f"revos_call_{name}_quote", f"Revos call quote: {name.replace('_', ' ')}", "textarea")

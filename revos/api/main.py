@@ -9,15 +9,18 @@ from typing import Any
 
 from fastapi import FastAPI, Request, Response
 
+from revos.esign.webhook import HELLO, SignatureWebhook, parse_callback_body
 from revos.modes import integration_modes
 from revos.obs import log
 from revos.slack.interactions import BadSignature, SlackInteractions, parse_press, verify_signature
 
 
 def create_app(interactions: SlackInteractions | None = None,
-               signing_secret: Callable[[], str] | str = "") -> FastAPI:
+               signing_secret: Callable[[], str] | str = "",
+               signatures: SignatureWebhook | None = None) -> FastAPI:
     app = FastAPI(title="Agentic Revenue OS")
     app.state.interactions = interactions
+    app.state.signatures = signatures
 
     def secret() -> str:
         return signing_secret() if callable(signing_secret) else signing_secret
@@ -63,18 +66,38 @@ def create_app(interactions: SlackInteractions | None = None,
             return Response(status_code=500)             # Slack may retry; the press was not recorded
         return Response(status_code=200)
 
+    @app.post("/dropboxsign/webhook")
+    async def dropboxsign_webhook(request: Request) -> Response:
+        service: SignatureWebhook | None = request.app.state.signatures
+        if service is None:
+            return Response(status_code=404)
+        form = await request.form()
+        payload = parse_callback_body({k: v for k, v in form.items() if isinstance(v, str)})
+        if payload is None:
+            log("esign", "webhook rejected", level="warning", why="no readable json field")
+            return Response(status_code=401)
+        try:
+            outcome = service.handle(payload)
+        except Exception as exc:  # noqa: BLE001
+            log("esign", "webhook failed", level="error", error=type(exc).__name__)
+            return Response(status_code=500)            # the event was not recorded: Dropbox Sign resends it
+        if outcome == "rejected":
+            return Response(status_code=401)
+        return Response(content=HELLO, status_code=200, media_type="text/plain")
+
     return app
 
 
 def build_default_app() -> FastAPI:
     """The app `revos run` serves: real Slack when its token is set, the mock otherwise."""
     from revos.adapters.clock import SystemClock
-    from revos.composition import build_slack
+    from revos.composition import build_esign, build_slack
     from revos.db import connect
     allowed = [u for u in os.environ.get("SLACK_ALLOWED_USERS", "").split(",") if u.strip()]
     slack, _ = build_slack()
     interactions = SlackInteractions(connect, SystemClock(), slack, allowed)
-    return create_app(interactions, lambda: os.environ.get("SLACK_SIGNING_SECRET", ""))
+    signatures = SignatureWebhook(build_esign(), connect, SystemClock())
+    return create_app(interactions, lambda: os.environ.get("SLACK_SIGNING_SECRET", ""), signatures)
 
 
 class _LazyApp:

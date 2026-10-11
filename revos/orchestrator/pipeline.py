@@ -749,6 +749,13 @@ class Orchestrator:
                                {"envelope_id": event.envelope_id, "kind": event.kind}, self.clock)
         return "queued" if created is not None else "duplicate"
 
+    def note_signature_event(self, envelope_id: str, kind: str, event_type: str) -> None:
+        """A progress event from the provider (sent, viewed, signed by one signer): audited, once."""
+        row = self.conn.execute("SELECT deal_id FROM actions WHERE type = 'send_io' AND provider_id = %s",
+                                (envelope_id,)).fetchone()
+        write_audit(self.conn, "webhook", f"signature.{kind}", row[0] if row else None,
+                    {"envelope_id": envelope_id, "event_type": event_type})
+
     def complete_signature(self, envelope_id: str) -> PipelineResult:
         """Close the deal once the provider itself confirms the signature. Safe to repeat."""
         action = self.conn.cursor(row_factory=dict_row).execute(
@@ -771,6 +778,9 @@ class Orchestrator:
                                      "signed_at": self.clock.now().isoformat()})
         self.advance(deal_id, DealStage.CLOSED_WON, "signed")
         write_audit(self.conn, "orchestrator", "deal.signed", deal_id, {"envelope_id": envelope_id})
+        self._crm_note(deal_id, f"{deal_id}:signed:{envelope_id}",
+                       f"Signed (TEST MODE, not legally binding): signature request {envelope_id}. "
+                       "The deal is closed won.")
         return self._create_handoff(deal_id, envelope_id)
 
     def _create_handoff(self, deal_id: UUID, envelope_id: str) -> PipelineResult:
@@ -1224,7 +1234,9 @@ class Orchestrator:
                                         (action_id,)).fetchone()[0]
             self.record_meeting_booked(deal_id, payload.get("start"))
         elif kind == "send_io":
-            self._merge_fields(deal_id, {"envelope_id": provider_id})
+            payload = self.conn.execute("SELECT payload FROM actions WHERE id = %s",
+                                        (action_id,)).fetchone()[0]
+            self._merge_fields(deal_id, {"envelope_id": provider_id, "io_total": payload.get("total")})
             self.advance(deal_id, DealStage.OUT_FOR_SIGNATURE, "sent for signature (test mode)")
         elif kind == "handoff":
             self.advance(deal_id, DealStage.HANDOFF, "handed to customer success")
@@ -1319,7 +1331,11 @@ class Orchestrator:
             self.poll_replies()
 
         def signature_event(_conn: psycopg.Connection, job: Any) -> None:
-            self.complete_signature(job.payload["envelope_id"])
+            if job.payload.get("kind") == "all_signed":
+                self.complete_signature(job.payload["envelope_id"])
+            else:                                       # sent, viewed, signed: recorded, nothing else moves
+                self.note_signature_event(job.payload["envelope_id"], job.payload.get("kind", "other"),
+                                          job.payload.get("event_type", ""))
 
         def slack_sync(_conn: psycopg.Connection, job: Any) -> None:
             if self.notifier is not None:

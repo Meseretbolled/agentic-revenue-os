@@ -20,6 +20,8 @@ dependencies = [
     "httpx",
     "typer",
     "rich",
+    "fpdf2",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]

@@ -6,7 +6,13 @@ import psycopg
 
 from revos.adapters.claude_llm import ClaudeLLM
 from revos.adapters.fake_llm import FakeLLM
-from revos.modes import fireflies_configured, gmail_keys, hubspot_configured, slack_configured
+from revos.modes import (
+    dropbox_sign_configured,
+    fireflies_configured,
+    gmail_keys,
+    hubspot_configured,
+    slack_configured,
+)
 from revos.ports.llm import LLM
 
 
@@ -82,6 +88,16 @@ def build_transcripts(world_transcripts):
     return FirefliesAdapter(os.environ["FIREFLIES_API_KEY"].strip())
 
 
+def build_esign(world_esign=None):
+    """The e-signature provider: Dropbox Sign (TEST MODE ONLY) when its key is set, else the mock."""
+    from revos.adapters.dropboxsign.client import DropboxSignAdapter
+    from revos.adapters.mock.esign import MockESign
+
+    if not dropbox_sign_configured():
+        return world_esign if world_esign is not None else MockESign()
+    return DropboxSignAdapter(os.environ["DROPBOX_SIGN_API_KEY"].strip())
+
+
 def build_identity():
     """Who the emails are from. Real mail needs a real postal address (see build_mail)."""
     from revos.agents.types import Identity
@@ -153,11 +169,16 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
     mailer, inbox = build_mail(conn)
     crm = build_crm()
     policy = PolicyConfig.from_env()
-    router = ActionRouter({"first_touch": mailer, "follow_up": mailer, "crm_update": crm,
-                           "crm_note": crm, "send_io": world.esign, "book_meeting": world.calendar,
-                           "handoff": world.chat})
-    packs = load_all(Path(__file__).resolve().parent.parent / "packs")
+    from revos.adapters.esign_provider import ESignOutboxProvider
+    from revos.adapters.slack.handoff import SlackHandoff
+    from revos.db import connect
+
     slack, channel = build_slack()
+    esign = build_esign(world.esign)
+    router = ActionRouter({"first_touch": mailer, "follow_up": mailer, "crm_update": crm,
+                           "crm_note": crm, "send_io": ESignOutboxProvider(esign, connect),
+                           "book_meeting": world.calendar, "handoff": SlackHandoff(slack, channel, connect)})
+    packs = load_all(Path(__file__).resolve().parent.parent / "packs")
     clock = clock or SystemClock()
     return Orchestrator(
         conn, ro_conn, clock=clock, packs=packs, runner=build_runner(conn),
@@ -168,5 +189,5 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
         notifier=SlackNotifier(conn, slack, channel, clock, packs),
         veto_window_seconds=(int(os.environ["VETO_WINDOW_SECONDS"])
                              if os.environ.get("VETO_WINDOW_SECONDS", "").strip() else None),
-        calendar=world.calendar, transcripts=build_transcripts(world.transcripts), esign=world.esign,
+        calendar=world.calendar, transcripts=build_transcripts(world.transcripts), esign=esign,
         inbox=inbox, crm_sync=True, daily_cap=int(os.environ.get("DAILY_SEND_CAP", "20")))
