@@ -3,11 +3,13 @@
   package   the largest pack package whose minimum monthly budget the stated budget reaches
   start     the pack's setup lead time from today, rounded up to a Monday, inside the stated timeline
   term      the pack's default term
+  quantities PER MONTH; campaign media takes the rest of the monthly budget
   discount  0, unless the pack's own volume rules apply
 
 A proposal is `ok` only when nothing falls outside the pack's limits. Otherwise it says exactly which
 term does, and a person decides; nothing here relaxes a limit."""
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -15,7 +17,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from revos.segments.loader import Pack
-from revos.skills.io import parse_budget_usd, validate_io
+from revos.skills.io import monthly_budget, validate_io
 
 _WORD_NUMBERS = {w: n for n, w in enumerate(
     "zero one two three four five six seven eight nine ten eleven twelve".split())}
@@ -34,21 +36,6 @@ class IOTermsProposal:
     deadline: str = ""
     needs_a_person: tuple[str, ...] = ()          # the terms that fall outside the pack's limits
     notes: tuple[str, ...] = field(default_factory=tuple)
-
-
-def monthly_budget(text: Any) -> tuple[float | None, str]:
-    """(dollars per month, the period it was stated for). The period must be stated: never guessed."""
-    amount = parse_budget_usd(text)
-    if amount is None or not isinstance(text, str):
-        return None, ""
-    low = text.lower()
-    if re.search(r"\b(a|per|each|every)\s+month\b|\bmonthly\b|/\s?mo(nth)?\b", low):
-        return amount, "month"
-    if re.search(r"\bquarter\b", low):
-        return amount / 3, "quarter"
-    if re.search(r"\b(a|per|each|every|first|this|next)\s+year\b|\bannual(ly)?\b|\byearly\b", low):
-        return amount / 12, "year"
-    return None, ""
 
 
 def parse_deadline(text: Any, today: date) -> date | None:
@@ -122,10 +109,24 @@ def propose_io_terms(pack: Pack, fields: Mapping[str, Any], today: date) -> IOTe
                                   f"{line.id} cannot be set")
                     continue
                 base = min(float(value), line.quantity_max) if line.quantity_max else float(value)
-            per_month = "month" in catalogue[line.id].unit
-            quantity = base * months if per_month else base
-            whole = float(quantity).is_integer()
-            items.append({"id": line.id, "quantity": int(quantity) if whole else quantity})
+            # quantities are PER MONTH: the document multiplies by the months of the term
+            items.append({"id": line.id, "quantity": int(base) if float(base).is_integer() else base})
+        if package.media_item and monthly is not None:
+            # the rest of the monthly budget goes to campaign media, so the monthly subtotal lands between
+            # the package minimum and the stated budget
+            if package.media_item not in catalogue:
+                person.append(f"package {package.id} names {package.media_item!r}, "
+                              "which is not on the rate card")
+            else:
+                fixed = sum(catalogue[i["id"]].price * i["quantity"] for i in items if i["id"] in catalogue)
+                media = math.floor((monthly - fixed) / catalogue[package.media_item].price)
+                if media <= 0:
+                    person.append(f"the {package.name} service lines (${fixed:,.0f} a month) leave nothing "
+                                  f"of the ${monthly:,.0f} a month budget for media")
+                else:
+                    items.append({"id": package.media_item, "quantity": media})
+                    notes.append(f"campaign media takes the rest of the monthly budget: {media:,} "
+                                 f"after ${fixed:,.0f} of service lines")
 
     discount = 0.0
     if monthly is not None:
@@ -142,10 +143,12 @@ def propose_io_terms(pack: Pack, fields: Mapping[str, Any], today: date) -> IOTe
         monthly, deadline.isoformat() if deadline else "", tuple(person), tuple(notes))
     if proposal.ok:                                      # one last look at the finished IO terms
         check = validate_io(pack, {**fields, "io_items": list(items), "io_start_date": proposal.start,
-                                   "io_end_date": proposal.end, "discount_pct": discount},
+                                   "io_end_date": proposal.end, "discount_pct": discount,
+                                   "io_package": proposal.package_id},
                             today=today)
-        terms_problems = [p for p in check.problems if p.startswith(("io_", "item ", "price", "discount",
-                                                                    "the term", "no IO", "HARD"))]
+        prefixes = ("io_", "item ", "price", "discount", "the term", "no IO", "HARD", "the monthly",
+                    "package")
+        terms_problems = [p for p in check.problems if p.startswith(prefixes)]
         if terms_problems:
             return IOTermsProposal(
                 False, proposal.items, proposal.start, proposal.end, discount, proposal.package_id, monthly,

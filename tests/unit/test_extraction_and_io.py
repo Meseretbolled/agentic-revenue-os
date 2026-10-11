@@ -57,12 +57,14 @@ def check(pack, **change):
 
 def test_a_complete_io_validates_and_totals_from_the_sample_rate_card(pack) -> None:
     result = check(pack)
-    assert result.ok and result.total == 40 * 120 + 2500 * 3 == 12300
-    assert [line["amount"] for line in result.line_items] == [4800, 7500]
+    monthly = 40 * 120 + 2500 * 3                       # quantities are PER MONTH
+    assert result.ok and result.monthly_subtotal == monthly == 12300
+    assert result.billed_months == 3 and result.term_subtotal == 36900 == result.total
+    assert [line["amount"] for line in result.line_items] == [4800, 7500]      # monthly amounts
 
 
 def test_a_discount_up_to_the_maximum_is_fine_and_reduces_the_total(pack) -> None:
-    assert check(pack, discount_pct=10).total == 11070
+    assert check(pack, discount_pct=10).total == 33210
     assert check(pack, discount_pct=15).ok                       # the maximum itself is allowed
 
 
@@ -138,11 +140,85 @@ def test_the_validation_reports_the_budget_and_the_term(pack) -> None:
 def test_the_rendered_io_carries_the_sample_label_the_terms_and_the_signer(pack) -> None:
     fields = {**BASE, "discount_pct": 0}
     text = render_io(pack, "Acme", validate_io(pack, fields, today=TODAY), fields, "IO-1", "2026-10-12")
-    assert "SAMPLE" in text and "Acme" in text and "Total: 12300.0" in text
+    assert "SAMPLE" in text and "Acme" in text
+    assert "Monthly subtotal: $12,300" in text and "Number of months: 3" in text
+    assert "Term total (for the whole 3-month term): $36,900" in text
+    assert "| Qty / month |" in text and "| $2,500 | $7,500 |" in text and "$40" in text
     assert "DCO and Creative Automation" in text and "2026-11-02 to 2027-02-01" in text
     assert "Priya Nair, Head of Finance" in text and "signer@fictional.example" in text
-    assert "Payment terms:" in text and "50,000" in text
+    assert "Payment terms:" in text and "$16,666.67 a month" in text
 
 
 def test_exit_criteria_for_io_come_from_the_pack(pack) -> None:
     assert set(pack.stages.exit_criteria[DealStage.QUALIFIED]) <= set(BASE)
+
+
+# --- the totals must agree with the package minimum and the stated budget -----------------------------------
+
+SCALE = {"io_package": "scale", "budget": "Our budget is about $40,000 a month.",
+         "io_items": [{"id": "creative_automation", "quantity": 2}, {"id": "multi_location", "quantity": 85},
+                      {"id": "measurement", "quantity": 1}, {"id": "campaign_media", "quantity": 30100}]}
+
+
+def test_the_arithmetic_is_per_month_times_months(pack) -> None:
+    result = check(pack, **SCALE)
+    assert result.ok, result.problems
+    assert result.monthly_subtotal == 2 * 2500 + 85 * 40 + 1500 + 30100 == 40000
+    assert result.billed_months == 3 and result.term_subtotal == 120000 == result.total
+    assert result.monthly_subtotal >= 35000                          # the Scale minimum
+    assert result.monthly_subtotal <= result.monthly_budget_usd      # the stated budget
+
+
+def test_a_term_total_below_the_package_minimum_fails(pack) -> None:
+    """The IO that was sent in the demo: $9,900 a month, $29,700 for the term, under Scale's $35,000."""
+    short = [i for i in SCALE["io_items"] if i["id"] != "campaign_media"]
+    result = check(pack, **{**SCALE, "io_items": short})
+    assert not result.ok and result.monthly_subtotal == 9900 and result.total == 29700
+    assert any("below the Scale (SAMPLE) minimum of $35,000.00 a month" in p for p in result.problems)
+
+
+def test_a_term_total_above_the_stated_budget_fails(pack) -> None:
+    result = check(pack, **{**SCALE, "budget": "Our budget is about $38,000 a month."})
+    assert not result.ok and any("above the stated budget of $38,000.00 a month" in p for p in result.problems)
+
+
+def test_a_budget_stated_per_year_is_compared_per_month(pack) -> None:
+    result = check(pack, **{**SCALE, "io_package": "", "budget": "Our budget is about $240,000 a year."})
+    assert not result.ok and any("above the stated budget of $20,000.00 a month" in p for p in result.problems)
+
+
+def test_the_same_quantities_over_a_longer_term_scale_the_total_and_pass(pack) -> None:
+    result = check(pack, **{**SCALE, "io_end_date": "2027-05-03"})                # six months
+    assert result.ok and result.billed_months == 6 and result.total == 240000
+
+
+def test_a_discount_that_pulls_the_net_below_the_minimum_fails(pack) -> None:
+    result = check(pack, **{**SCALE, "io_items": [{"id": "campaign_media", "quantity": 36000}],
+                            "discount_pct": 15})
+    assert not result.ok and any("below the Scale (SAMPLE) minimum" in p for p in result.problems)
+
+
+def test_an_unknown_package_fails(pack) -> None:
+    assert any("not in the pack" in p for p in check(pack, **{**SCALE, "io_package": "platinum"}).problems)
+
+
+def test_the_rendered_io_states_monthly_subtotal_months_and_term_total_in_dollars(pack) -> None:
+    fields = {**BASE, **SCALE}
+    text = render_io(pack, "Acme", validate_io(pack, fields, today=TODAY), fields, "IO-1", "2026-10-12")
+    assert "Monthly subtotal: $40,000" in text and "Number of months: 3" in text
+    assert "Term total (for the whole 3-month term): $120,000" in text
+    assert "| Campaign media spend (pass-through) |" in text and "| 30,100 | $1 | $30,100 |" in text
+    assert "Package: Scale (SAMPLE)" in text and "$29,700" not in text
+
+
+def test_the_pdf_table_wraps_long_cells_inside_the_page_and_shows_dollars(pack) -> None:
+    from fpdf import FPDF
+
+    from revos.skills import io_pdf
+    from revos.skills.io_pdf import render_io_pdf
+    assert sum(io_pdf._WIDTHS) <= FPDF().epw + 0.01                  # the columns fit between the margins
+    fields = {**BASE, **SCALE}
+    document = render_io(pack, "Acme", validate_io(pack, fields, today=TODAY), fields, "IO-1", "2026-10-12")
+    long_unit = document.replace("per location per month", "per location per month, billed monthly in arrears")
+    pdf = render_io_pdf(long_unit)
+    assert pdf.startswith(b"%PDF") and len(pdf) > 1000

@@ -124,3 +124,29 @@ def test_the_start_date_is_after_today_and_inside_the_timeline(conn, ro_conn, pa
     fields = conn.execute("SELECT fields FROM deals").fetchone()[0]
     start = datetime.fromisoformat(fields["io_start_date"])
     assert start.weekday() == 0 and start > clock.now().replace(tzinfo=None)
+
+
+def test_the_generated_io_agrees_with_the_package_and_the_budget(conn, ro_conn, pack, clock):
+    rig = qualified(conn, ro_conn, pack, clock)                    # $50k for the quarter: $16,667 a month, Growth
+    lead_record(conn)
+    rig.orch.handle_io(rig.deal_id)
+    doc_text, check = conn.execute("SELECT body, validation FROM documents").fetchone()
+    floor = next(p.min_monthly_budget_usd for p in pack.rate_card.packages if p.id == "growth")
+    assert check["ok"] and floor <= check["monthly_subtotal"] <= 50000 / 3
+    assert check["months"] == 3 and check["total"] == pytest.approx(check["monthly_subtotal"] * 3)
+    assert "Quantities and amounts in the table are PER MONTH." in doc_text
+    assert "Number of months: 3" in doc_text and "Term total (for the whole 3-month term): $" in doc_text
+    assert f"${check['monthly_subtotal']:,.0f}" in doc_text
+
+
+def test_an_io_whose_term_total_is_below_the_package_minimum_is_not_sent(conn, ro_conn, pack, clock):
+    rig = qualified(conn, ro_conn, pack, clock)
+    lead_record(conn, budget="Our budget is about $40,000 a month.")
+    short = [{"id": "creative_automation", "quantity": 2}, {"id": "multi_location", "quantity": 85},
+             {"id": "measurement", "quantity": 1}]                   # $9,900 a month, $29,700 for 3 months
+    rig.orch.set_io_terms(rig.deal_id, items=short, start="2026-11-02", end="2027-02-01", discount_pct=0,
+                          actor="deal-desk", package="scale")
+    result = rig.orch.handle_io(rig.deal_id)
+    send_all(rig)
+    assert result.status == "needs_human" and "below the Scale (SAMPLE) minimum" in result.reason
+    assert rig.world.esign.requests == [] and stage(conn) != "out_for_signature"

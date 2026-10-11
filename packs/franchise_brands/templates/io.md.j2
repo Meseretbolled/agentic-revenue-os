@@ -4,16 +4,21 @@
 
 Advertiser: {{ advertiser_name }}
 Date: {{ date | default("") }}
-Term: {{ start_date }} to {{ end_date }}
+Term: {{ start_date }} to {{ end_date }} ({{ months }} months)
 Signer: {{ signer_name }}, {{ signer_role }} ({{ signer_email }})
-Budget stated on the discovery call: {{ "{:,.0f}".format(budget_usd) if budget_usd else "not stated" }} USD
-Term: {{ term_months if term_months else "n/a" }} months
+Budget stated on the discovery call: {{ budget_text }}
+{% if package_name %}Package: {{ package_name }}
+{% endif %}
+Quantities and amounts in the table are PER MONTH.
 
-| Item | Unit | Quantity | Unit price | Amount |
+| Item | Unit | Qty / month | Unit price | Monthly amount |
 |---|---|---|---|---|
 {% for item in line_items %}| {{ item.name }} | {{ item.unit }} | {{ item.quantity }} | {{ item.unit_price }} | {{ item.amount }} |
 {% endfor %}
+Monthly subtotal: {{ monthly_subtotal }}
+Number of months: {{ months }}
+Term subtotal ({{ monthly_subtotal }} x {{ months }} months): {{ term_subtotal }}
 Discount: {{ discount_pct | default(0) }}%
-**Total: {{ total }}**
+**Term total (for the whole {{ months }}-month term): {{ total }}**
 
 Payment terms: {{ payment_terms }}

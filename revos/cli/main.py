@@ -118,7 +118,7 @@ def calls_reassign(transcript_id: str, deal_id: str) -> None:
 @app.command("io-terms")
 def io_terms(
     deal_id: str,
-    items_arg: str = typer.Option(None, "--items", help="item=quantity,... (multi_location=120,...)"),
+    items_arg: str = typer.Option(None, "--items", help="item=qty PER MONTH,... (multi_location=85,...)"),
     start: str = typer.Option(None, help="start date, YYYY-MM-DD"),
     end: str = typer.Option(None, help="end date, YYYY-MM-DD"),
     discount: float = typer.Option(0.0, help="discount percent (over the pack maximum is a hard block)"),
@@ -170,9 +170,10 @@ def io_command(deal_id: str) -> None:
         deal = orch._deal(UUID(deal_id))
         check = validate_io(orch._pack(deal), deal["fields"] or {}, today=clock.now().date(),
                             signer_allowed=orch._signer_allowed())
-        typer.echo(f"validation: {'OK' if check.ok else 'FAILED'}; total {check.total}; "
-                   f"budget {check.budget_usd}; term {check.term_months} months; "
-                   f"payment terms {check.payment_terms}")
+        typer.echo(f"validation: {'OK' if check.ok else 'FAILED'}; monthly subtotal "
+                   f"${check.monthly_subtotal:,.2f} x {check.billed_months:g} months = term total "
+                   f"${check.total:,.2f}; stated budget {check.monthly_budget_usd} a month; "
+                   f"package {check.package_id or 'none'}; payment terms {check.payment_terms}")
         for problem in check.problems:
             typer.echo(f"  problem: {problem}")
         result = orch.handle_io(UUID(deal_id))

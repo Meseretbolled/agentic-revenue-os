@@ -252,7 +252,7 @@ def test_a_valid_io_is_built_validated_approved_and_sent_for_signature_in_test_m
     assert result.status == "action_proposed" and result.decision == "auto"
     assert stage(conn) == "io_approval"
     doc = conn.execute("SELECT body, validation FROM documents").fetchone()
-    assert doc[1]["ok"] is True and doc[1]["total"] == 11070.0
+    assert doc[1]["ok"] is True and doc[1]["total"] == 33210.0
     assert "SAMPLE" in doc[0] and "Priya Nair, Head of Finance" in doc[0]
 
     send_all(rig)
@@ -411,7 +411,7 @@ def test_the_handoff_message_is_created_once_with_summary_signer_terms_and_open_
     post = rig.world.chat.posts[0]
     assert post.channel == "#revops"
     for expected in ("Closed won: Brightside Optical Group", "Decision maker Dana Park (CMO)",
-                     "Signer: Priya Nair (Head of Finance)", "Total 11070.0 after a 10% discount",
+                     "Signer: Priya Nair (Head of Finance)", "term total $33,210 after a 10% discount",
                      "2026-11-02 to 2027-02-01", "SAMPLE rate card", f"envelope {envelope}", "TEST MODE",
                      "Open items:", "raised on the call:", "replace the sample terms", "Lessons used"):
         assert expected in post.text, expected

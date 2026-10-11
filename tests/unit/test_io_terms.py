@@ -64,14 +64,16 @@ def test_the_terms_follow_the_pack_and_the_call(pack) -> None:
     assert date.fromisoformat(got.start).weekday() == 0
     assert got.deadline == "2026-11-23" and got.monthly_budget_usd == 40000
     quantities = {i["id"]: i["quantity"] for i in got.items}
-    assert quantities == {"creative_automation": 6, "multi_location": 255, "measurement": 3}   # x3 months
+    # quantities are PER MONTH; campaign media takes the rest of the $40,000 a month budget
+    assert quantities == {"creative_automation": 2, "multi_location": 85, "measurement": 1,
+                          "campaign_media": 30100}
 
 
 def test_a_quantity_follows_the_lead_field_up_to_the_packages_cap(pack) -> None:
     growth = fields(budget="$20,000 a month", location_count=85)
-    assert {i["id"]: i["quantity"] for i in propose_io_terms(pack, growth, TODAY).items}["multi_location"] == 180
+    assert {i["id"]: i["quantity"] for i in propose_io_terms(pack, growth, TODAY).items}["multi_location"] == 60
     small = fields(budget="$20,000 a month", location_count=12)
-    assert {i["id"]: i["quantity"] for i in propose_io_terms(pack, small, TODAY).items}["multi_location"] == 36
+    assert {i["id"]: i["quantity"] for i in propose_io_terms(pack, small, TODAY).items}["multi_location"] == 12
     unknown = propose_io_terms(pack, {k: v for k, v in growth.items() if k != "location_count"}, TODAY)
     assert not unknown.ok and "location_count is not known" in unknown.needs_a_person[0]
 
@@ -117,3 +119,16 @@ def test_a_proposal_that_is_ok_passes_the_ios_own_validation(pack) -> None:
     check = validate_io(pack, {**fields(), "io_items": list(got.items), "io_start_date": got.start,
                                "io_end_date": got.end, "discount_pct": got.discount_pct}, today=TODAY)
     assert check.ok, check.problems
+
+
+def test_the_proposed_monthly_subtotal_sits_between_the_package_minimum_and_the_budget(pack) -> None:
+    from revos.skills.io import validate_io
+    for budget, package in (("$40,000 a month", "scale"), ("$20,000 a month", "growth"),
+                            ("$6,000 a month", "starter"), ("$60,000 a month", "scale")):
+        got = propose_io_terms(pack, fields(budget=budget), TODAY)
+        check = validate_io(pack, {**fields(budget=budget), "io_items": list(got.items), "io_package": package,
+                                   "io_start_date": got.start, "io_end_date": got.end}, today=TODAY)
+        floor = next(p.min_monthly_budget_usd for p in pack.rate_card.packages if p.id == package)
+        assert got.ok and check.ok, (budget, check.problems)
+        assert floor <= check.monthly_subtotal <= check.monthly_budget_usd
+        assert check.total == check.monthly_subtotal * check.billed_months

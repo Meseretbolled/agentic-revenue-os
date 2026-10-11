@@ -264,7 +264,7 @@ def test_all_signed_closes_the_deal_once_updates_hubspot_and_posts_the_handoff(c
     (deal,) = fake.objects["deals"].values()
     props = deal["properties"]
     assert props["revos_signature_request_id"] == envelope and props["revos_signed_at"]
-    assert props["closedate"] == props["revos_signed_at"] and float(props["amount"]) == 11070.0
+    assert props["closedate"] == props["revos_signed_at"] and float(props["amount"]) == 33210.0
     assert props["revos_stage"] in {"closed_won", "handoff"}
     assert any(envelope in n and "Signed (TEST MODE" in n for n in [
         x["properties"]["hs_note_body"] for x in fake.objects["notes"].values()])

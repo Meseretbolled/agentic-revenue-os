@@ -7,20 +7,24 @@ items:
   - {id: multi_location, name: "Franchise and Multi-location", unit: "per location per month", price: 40}
   - {id: media_fee, name: "Media activation management fee", unit: "percent of media spend", price: 12}
   - {id: measurement, name: "Measurement and Attribution", unit: "per month", price: 1500}
+  - {id: campaign_media, name: "Campaign media spend (pass-through)", unit: "per $1 of media per month", price: 1}
 
 # SAMPLE packages (invented for the demo). The IO planner picks the largest package whose minimum monthly
-# budget the lead's stated budget reaches. Quantities are per month; a line's quantity may follow a lead
+# budget the lead's stated budget reaches, then fills the rest of that monthly budget with `media_item`, so the
+# monthly subtotal sits between the package minimum and the budget. Quantities are per month; a line's quantity may follow a lead
 # field (location_count). No volume discount by default: add {min_monthly_budget_usd, discount_pct} rows.
 packages:
   - id: starter
     name: "Starter (SAMPLE)"
     min_monthly_budget_usd: 5000
+    media_item: campaign_media
     lines:
       - {id: creative_automation, quantity: 1}
       - {id: measurement, quantity: 1}
   - id: growth
     name: "Growth (SAMPLE)"
     min_monthly_budget_usd: 15000
+    media_item: campaign_media
     lines:
       - {id: creative_automation, quantity: 1}
       - {id: multi_location, quantity_from: location_count, quantity_max: 60}
@@ -28,6 +32,7 @@ packages:
   - id: scale
     name: "Scale (SAMPLE)"
     min_monthly_budget_usd: 35000
+    media_item: campaign_media
     lines:
       - {id: creative_automation, quantity: 2}
       - {id: multi_location, quantity_from: location_count, quantity_max: 200}

@@ -399,8 +399,11 @@ class PackageLine(Strict):
 class Package(Strict):
     id: str = Field(pattern=ID)
     name: str = Field(min_length=1)
-    min_monthly_budget_usd: float = Field(ge=0)       # chosen when the stated budget reaches this
+    min_monthly_budget_usd: float = Field(ge=0)       # chosen when the stated budget reaches this; the IO's
+    # monthly subtotal must reach it too
     lines: list[PackageLine] = Field(min_length=1)
+    media_item: str | None = None                     # the rate card item that takes the rest of the monthly
+    # budget (campaign media); its quantity is whatever the fixed lines leave
 
 
 class VolumeDiscount(Strict):

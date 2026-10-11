@@ -14,8 +14,10 @@ def build_handoff(*, company: str, contact: str | None, tier: str | None, total:
     decision = (f"{fields['decision_maker_name']} ({fields['decision_maker_role']})"
                 if fields.get("decision_maker_name") else fields.get("decision_maker") or "not recorded")
     score = f"tier {tier} ({total}/100)" if tier else "not scored"
-    items = "; ".join(f"{line['quantity']} x {line['name']} at {line['unit_price']} {line['unit']}"
+    items = "; ".join(f"{line['quantity']:,g} x {line['name']} at ${line['unit_price']:,g} {line['unit']}"
                       for line in terms["line_items"])
+    monthly = sum(line["quantity"] * line["unit_price"] for line in terms["line_items"])
+    months = terms.get("months")
     discount = fields.get("discount_pct", 0) or 0
     open_items = [*open_objections(fields),
                   f"agree the kick-off for the start date {fields.get('io_start_date')}",
@@ -24,8 +26,10 @@ def build_handoff(*, company: str, contact: str | None, tier: str | None, total:
         f"Closed won: {company}",
         f"Summary: {score}. Contact {contact or 'unknown'}. Decision maker {decision}.",
         f"Signer: {signer}.",
-        f"Terms: {items}. Total {terms['total']} after a {discount}% discount, "
-        f"{fields.get('io_start_date')} to {fields.get('io_end_date')}. {rate_card_label}",
+        f"Terms (quantities per month): {items}. Monthly subtotal ${monthly:,.0f}"
+        + (f" x {months:g} months" if months else "") + f", term total ${terms['total']:,.0f} after a "
+        f"{discount}% discount, {fields.get('io_start_date')} to {fields.get('io_end_date')}. "
+        f"{rate_card_label}",
         f"Signature: envelope {envelope_id}, TEST MODE, so it is not legally binding.",
         "Open items: " + "; ".join(open_items) + ".",
         "Lessons used on this deal: " + (", ".join(f"L{i}" for i in lesson_ids) or "none") + ".",

@@ -386,7 +386,7 @@ def test_contract_io_builds_a_sample_labelled_document_and_sends_it_in_test_mode
     applied = rig.orch.apply_run(run, rig.deal_id)
     assert all(a["status"] == "approved" for a in applied)
     doc = conn.execute("SELECT body, validation FROM documents").fetchone()
-    assert "SAMPLE" in doc[0] and "Total: 12300.0" in doc[0] and doc[1]["ok"] is True
+    assert "SAMPLE" in doc[0] and "Term total (for the whole 3-month term): $36,900" in doc[0] and doc[1]["ok"] is True
     assert rig.orch.send_action(applied[1]["action_id"]).status == "sent"
     request = rig.world.esign.requests[0]
     assert request.test_mode is True and request.signer_email == "sam.lee@brightside-optical.example"

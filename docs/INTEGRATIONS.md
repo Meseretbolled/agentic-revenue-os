@@ -425,7 +425,13 @@ the terms from the call fields and the pack's SAMPLE rate card, then `validate_i
 - **Package**: the largest package whose `min_monthly_budget_usd` the stated monthly budget reaches (a budget
   with no stated period is not guessed; a person is asked).
 - **Start date**: the first Monday on or after today + `io_min_lead_days`; a timeline too tight for that needs a person.
-- **Term**: `io_default_term_months`; quantities are per month times months, with `location_count` capped by the pack.
+- **Term**: `io_default_term_months`. Quantities are PER MONTH (`location_count` capped by the pack); the document
+  multiplies by the months: monthly subtotal x months = term total.
+- **Campaign media**: the package's `media_item` takes the rest of the monthly budget, so the monthly subtotal sits
+  between the package minimum and the stated budget (SAMPLE numbers: Scale at $40,000 a month = $9,900 of service
+  lines + $30,100 media = $120,000 over 3 months).
+- **Validated in code**: the net monthly subtotal must reach the package minimum and not exceed the stated monthly
+  budget (a quarterly or yearly budget is converted); either failure blocks the IO.
 - **Discount**: 0 unless the pack's `volume_discounts` say otherwise. Over the pack maximum is a hard block, no override.
 - **A person** is involved only when a term falls outside the pack's limits (`io.terms_need_a_person` audit).
 - `revos io-terms` stays as an override; it is audited as `deal.io_terms_set` with source `override` (planner: `auto`)

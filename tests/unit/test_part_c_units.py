@@ -94,12 +94,13 @@ def test_the_handoff_has_summary_signer_terms_and_open_items() -> None:
         fields={"decision_maker_name": "Dana Park", "decision_maker_role": "CMO", "signer_name": "Priya Nair",
                 "signer_role": "Head of Finance", "io_start_date": "2026-11-02", "io_end_date": "2027-02-01",
                 "discount_pct": 10, "objections": "attribution worries us"},
-        terms={"total": 11070.0, "line_items": [{"quantity": 3, "name": "Creative", "unit_price": 2500,
-                                                  "unit": "per month"}]},
+        terms={"total": 20250.0, "months": 3, "line_items": [{"quantity": 3, "name": "Creative",
+                                                                 "unit_price": 2500, "unit": "per month"}]},
         rate_card_label="SAMPLE rate card", envelope_id="env-1", lesson_ids=[4, 2])
     for expected in ("Closed won: Acme", "tier B (61/100)", "Decision maker Dana Park (CMO)",
-                     "Signer: Priya Nair (Head of Finance)", "3 x Creative at 2500 per month",
-                     "Total 11070.0 after a 10% discount", "2026-11-02 to 2027-02-01", "SAMPLE rate card",
+                     "Signer: Priya Nair (Head of Finance)", "3 x Creative at $2,500 per month",
+                     "quantities per month", "Monthly subtotal $7,500 x 3 months",
+                     "term total $20,250 after a 10% discount", "2026-11-02 to 2027-02-01", "SAMPLE rate card",
                      "TEST MODE", "not legally binding", "raised on the call: attribution worries us",
                      "agree the kick-off", "replace the sample terms", "L4, L2"):
         assert expected in text, expected

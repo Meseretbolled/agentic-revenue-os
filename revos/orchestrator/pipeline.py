@@ -89,7 +89,7 @@ FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
 EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role", "signer_name",
                 "signer_role"}
 # What the IO is built from: a change to any of these is a new IO run.
-IO_KEYS = ("io_items", "io_start_date", "io_end_date", "discount_pct", "signer_email",
+IO_KEYS = ("io_items", "io_package", "io_start_date", "io_end_date", "discount_pct", "signer_email",
            "signer_name", "signer_role", "budget", "timeline", "decision_maker", "needs")
 QUALIFICATION_KEYS = ("budget", "timeline", "decision_maker", "needs", "signer_name", "signer_role")
 DEFAULT_SNOOZE_DAYS = 3        # no return date stated: look again after this long
@@ -504,7 +504,9 @@ class Orchestrator:
                 "AND kind = 'io'), %s, %s)",
                 (deal_id, deal_id, payload["document"], Jsonb({
                     "ok": check.ok, "problems": list(check.problems), "total": check.total,
-                    "line_items": list(check.line_items)})))
+                    "line_items": list(check.line_items), "monthly_subtotal": check.monthly_subtotal,
+                    "months": check.billed_months, "term_subtotal": check.term_subtotal,
+                    "package": check.package_id})))
             self._merge_fields(deal_id, {"io_validated": check.ok})      # from the rules, not the agent
         elif atype == "lesson_write":
             self._write_lesson(deal, payload)
@@ -671,12 +673,14 @@ class Orchestrator:
 
     # --- a person enters terms or approves a discount (agents cannot) -----------------------------
     def set_io_terms(self, deal_id: UUID, *, items: list[dict[str, Any]], start: str, end: str,
-                     discount_pct: float, actor: str, detail: Mapping[str, Any] | None = None) -> None:
+                     discount_pct: float, actor: str, detail: Mapping[str, Any] | None = None,
+                     package: str = "") -> None:
         """Set the IO's terms. `actor` 'io-planner' is the automatic proposal; anyone else is a person's
         override. Both are audited, and a person's override is never replaced by a proposal."""
         source = "auto" if actor == "io-planner" else "override"
         self._merge_fields(deal_id, {"io_items": items, "io_start_date": start, "io_end_date": end,
-                                     "discount_pct": discount_pct, "io_terms_source": source})
+                                     "discount_pct": discount_pct, "io_terms_source": source,
+                                     "io_package": package})
         write_audit(self.conn, actor, "deal.io_terms_set", deal_id,
                     {"items": items, "start": start, "end": end, "discount_pct": discount_pct,
                      "source": source, **(dict(detail) if detail else {})})
@@ -697,7 +701,8 @@ class Orchestrator:
             return PipelineResult("needs_human", deal["stage"], self.runner.name,
                                   f"IO terms fall outside the pack's limits: {why}")
         self.set_io_terms(deal_id, items=list(proposal.items), start=proposal.start, end=proposal.end,
-                          discount_pct=proposal.discount_pct, actor="io-planner", detail={
+                          discount_pct=proposal.discount_pct, actor="io-planner",
+                          package=proposal.package_id, detail={
                               "package": proposal.package_id, "notes": list(proposal.notes),
                               "monthly_budget_usd": proposal.monthly_budget_usd,
                               "budget_quote": fields.get("quote:budget"),
