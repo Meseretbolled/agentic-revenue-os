@@ -12,6 +12,7 @@ from typing import Literal
 
 from revos.domain.errors import QuarantinedContent
 from revos.domain.injection import Finding, extract_html, normalise, scan
+from revos.domain.quoted import new_text
 
 Kind = Literal["reply", "web_page", "transcript"]
 _LOOKALIKE = re.compile(r"<<\s*/?\s*untrusted", re.IGNORECASE)
@@ -67,10 +68,12 @@ class UntrustedText:
                 "findings": [{"rule": f.rule_id, "snippet": f.snippet, "hidden": f.hidden}
                              for f in self.findings]}
 
-    def snippets(self, pattern: str) -> list[str]:
+    def snippets(self, pattern: str, *, fresh_only: bool = False) -> list[str]:
         """Code-extracted matches of a regex from the visible text (for example a date). Only the
-        matched snippets leave; the text itself does not."""
-        return [m.group(0) for m in re.finditer(pattern, self._visible, re.IGNORECASE)]
+        matched snippets leave; the text itself does not. `fresh_only` ignores quoted history: a reply
+        that quotes our own offered times must not be read as naming all of them."""
+        text = new_text(self._visible) if fresh_only else self._visible
+        return [m.group(0) for m in re.finditer(pattern, text, re.IGNORECASE)]
 
     def contains_quote(self, quote: str) -> bool:
         """True if `quote` appears in the visible text (whitespace and case ignored)."""

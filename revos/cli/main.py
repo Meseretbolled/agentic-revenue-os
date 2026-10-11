@@ -93,6 +93,28 @@ def calls_assign(transcript_id: str, deal_id: str) -> None:
     typer.echo(f"{transcript_id}: {outcome} for deal {deal_id}")
 
 
+@calls_app.command("reassign")
+def calls_reassign(transcript_id: str, deal_id: str) -> None:
+    """Move a call handled for a CLOSED deal onto an open one and process it there (audited)."""
+    from uuid import UUID
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    load_env_file()
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        orch = build_orchestrator(conn, ro, SystemClock())
+        try:
+            outcome = orch.reassign_call(transcript_id, UUID(deal_id), "operator")
+        except LookupError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+    typer.echo(f"{transcript_id}: {outcome} for deal {deal_id}")
+
+
 @app.command("io-terms")
 def io_terms(
     deal_id: str,
@@ -155,6 +177,37 @@ def io_command(deal_id: str) -> None:
             typer.echo(f"  problem: {problem}")
         result = orch.handle_io(UUID(deal_id))
     typer.echo(f"result: {result.status} (stage {result.stage}); {result.reason or ''}")
+
+
+@app.command("reprocess-reply")
+def reprocess_reply_command(deal_id: str, message_id: str = typer.Option(
+        "", help="Message-ID of the stored reply; default is the latest inbound one")) -> None:
+    """Handle a stored reply again after a bug was fixed. Only when the last reply was left for a person;
+    audited as reply.reprocessed. Sends nothing twice (the outbox keeps its keys)."""
+    from uuid import UUID
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    load_env_file()
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        if not message_id:
+            row = conn.execute("SELECT message_id FROM messages WHERE deal_id = %s AND direction = 'inbound' "
+                               "ORDER BY id DESC LIMIT 1", (UUID(deal_id),)).fetchone()
+            if row is None:
+                typer.echo("no inbound reply stored for this deal")
+                raise typer.Exit(1)
+            message_id = row[0]
+        orch = build_orchestrator(conn, ro, SystemClock())
+        try:
+            result = orch.reprocess_reply(UUID(deal_id), message_id)
+        except ValueError as exc:
+            typer.echo(f"not reprocessed: {exc}")
+            raise typer.Exit(1) from None
+    typer.echo(f"result: {result.status} (stage {result.stage}); label {result.label}; {result.reason or ''}")
 
 
 @app.command("call-demo")

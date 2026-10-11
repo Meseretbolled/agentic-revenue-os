@@ -171,7 +171,7 @@ def test_the_score_reason_and_lessons_are_shown_and_the_body_is_clipped() -> Non
 # --- health ---------------------------------------------------------------------------------------------------------
 
 def test_healthz_and_health_answer_ok_without_a_database() -> None:
-    client = TestClient(create_app(None, ""))
+    client = TestClient(create_app(None, ""), base_url="http://localhost")
     for path in ("/healthz", "/health"):
         assert client.get(path).json() == {"status": "ok"}
     assert "integrations" in client.get("/status").json()

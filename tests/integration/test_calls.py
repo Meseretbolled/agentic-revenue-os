@@ -370,3 +370,27 @@ def test_a_person_can_assign_a_held_call_and_it_is_then_processed_once(conn, ro_
     assert rig.orch.poll_calls() == [("call-amb", "seen")]
     with pytest.raises(LookupError):
         rig.orch.assign_held_call("nope", rig.deal_id, "owner")
+
+
+def test_a_call_handled_for_a_closed_deal_can_be_moved_to_a_live_one_once_and_audited(conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock, email="sam.lee@brightside-optical.example")
+    rig.world.transcripts.add(call("call-old"))
+    assert rig.orch.poll_calls() == [("call-old", "processed")]
+    live, _ = make_lead(conn, email="pat.kim@harborview.example", name="Pat Kim", company="Harborview",
+                        domain="harborview.example")
+    force_stage(conn, live, DealStage.MEETING)
+
+    with pytest.raises(LookupError, match="still open"):                  # the first deal is not closed
+        rig.orch.reassign_call("call-old", live, "owner")
+    from revos.orchestrator.transitions import transition_deal
+    transition_deal(conn, rig.deal_id, DealStage.CLOSED_LOST, actor="test", reason="set-up")
+
+    assert rig.orch.reassign_call("call-old", live, "owner") == "processed"
+    (row,) = audit(conn, "call.reassigned", live)
+    assert row["transcript"] == "call-old" and row["from_deal"] == str(rig.deal_id)
+    assert conn.execute("SELECT deal_id FROM transcripts WHERE external_id = 'call-old'").fetchone()[0] == live
+    assert conn.execute("SELECT stage FROM deals WHERE id = %s", (live,)).fetchone()[0] == "qualified"
+    assert rig.orch.reassign_call("call-old", live, "owner") == "seen"     # already there: nothing again
+    assert len(audit(conn, "call.reassigned", live)) == 1
+    with pytest.raises(LookupError):
+        rig.orch.reassign_call("never-handled", live, "owner")

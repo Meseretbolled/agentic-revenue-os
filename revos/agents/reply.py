@@ -92,9 +92,11 @@ def run(env: AgentEnv) -> AgentOutput:
                 "postal_address": env.identity.postal_address})
             invite = {"start": chosen.isoformat(), "minutes": 30,
                       "summary": f"Intro call with {contact.get('full_name') or 'you'}"}
+            if "meeting_start" not in deal["fields"]:          # never book a meeting twice
+                proposals.append(make(
+                    "book_meeting", d, c, {"start": chosen.isoformat(), "title": invite["summary"],
+                                           "message_id": message_id}, [], "they accepted an offered time"))
             proposals += [
-                make("book_meeting", d, c, {"start": chosen.isoformat(), "title": invite["summary"],
-                                            "message_id": message_id}, [], "they accepted an offered time"),
                 make("follow_up", d, c, {
                     "subject": draft.subject, "body": draft.body, "claims": [],
                     "template": "meeting_confirmation", "invite": invite, "in_reply_to": message_id,

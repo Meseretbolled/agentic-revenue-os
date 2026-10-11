@@ -2,7 +2,8 @@
 
 import json
 import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -476,3 +477,53 @@ def test_booking_is_recorded_once_however_often_the_step_is_repeated(conn, ro_co
         rig.orch.record_meeting_booked(rig.deal_id, slot.isoformat())
     assert len(audit(conn, "meeting.booked", rig.deal_id)) == 1
     assert len(rig.world.calendar.invites) == 1 and stage(conn) == "meeting"
+
+
+def test_a_reply_mishandled_before_can_be_reprocessed_once_and_books_the_meeting_once(conn, ro_conn, pack, clock):
+    rig = with_offer(conn, ro_conn, pack, clock)
+    slot = offered_slots(conn)[0]
+    email = mail(accept_text(slot + timedelta(days=3)), "acc7")        # names a time we did not offer
+    assert rig.orch.handle_reply(rig.deal_id, email).status == "needs_human"
+    assert rig.world.calendar.invites == []
+
+    offered = [s.isoformat() for s in offered_slots(conn)] + [(slot + timedelta(days=3)).isoformat()]
+    conn.execute("UPDATE deals SET fields = jsonb_set(fields, '{offered_slots}', %s::jsonb)",
+                 (json.dumps(offered),))                                # a person corrects the offer
+    result = rig.orch.reprocess_reply(rig.deal_id, "<acc7@brightside-optical.example>")
+    send_all(rig)
+    assert result.status == "completed" and stage(conn) == "meeting"
+    assert len(rig.world.calendar.invites) == 1
+    assert len(audit(conn, "reply.reprocessed", rig.deal_id)) == 1
+
+    with pytest.raises(ValueError, match="not left for a person"):       # again: refused, nothing goes out twice
+        rig.orch.reprocess_reply(rig.deal_id, "<acc7@brightside-optical.example>")
+    send_all(rig)
+    assert len(rig.world.calendar.invites) == 1
+    assert conn.execute("SELECT count(*) FROM actions WHERE type = 'book_meeting'").fetchone()[0] == 1
+    with pytest.raises(ValueError):
+        rig.orch.reprocess_reply(rig.deal_id, "<no-such-message>")
+
+    # the confirmation email was blocked afterwards: that is a reason to reprocess, but never to book twice
+    conn.execute("UPDATE actions SET status = 'cancelled' WHERE type = 'follow_up' AND id = ("
+                 "SELECT id FROM actions WHERE type = 'follow_up' ORDER BY created_at DESC LIMIT 1)")
+    rig.orch.reprocess_reply(rig.deal_id, "<acc7@brightside-optical.example>")
+    send_all(rig)
+    assert len(rig.world.calendar.invites) == 1
+    assert conn.execute("SELECT count(*) FROM actions WHERE type = 'book_meeting'").fetchone()[0] == 1
+
+
+def test_a_confirmation_in_the_prospects_own_time_zone_passes_the_claim_check_and_sends(conn, ro_conn, pack, clock):
+    rig = make_rig(conn, ro_conn, pack, clock)
+    first = rig.orch.handle_lead_created(rig.deal_id)
+    rig.orch.send_action(first.action_id)
+    rig.orch.handle_reply(rig.deal_id, mail("Sounds good, let's talk next week", "i1"))
+    send_all(rig)
+    conn.execute("UPDATE contacts SET timezone = 'America/Chicago'")      # the prospect answers in their zone
+    local = offered_slots(conn)[0].astimezone(ZoneInfo("America/Chicago"))
+    result = rig.orch.handle_reply(rig.deal_id, mail(accept_text(local), "acc8"))
+    clock.advance(6 * 3600)                                  # into the prospect's own sending hours
+    send_all(rig)
+    assert result.status == "completed"
+    confirmation = rig.world.mailer.sent[-1]
+    assert "(your time, UTC-5)" in confirmation.subject and confirmation.attachments
+    assert stage(conn) == "meeting" and len(rig.world.calendar.invites) == 1

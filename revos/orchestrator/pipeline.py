@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -68,7 +69,7 @@ from revos.skills.handoff import build_handoff
 from revos.skills.io import validate_io
 from revos.skills.io_terms import propose_io_terms
 from revos.skills.scoring import score_lead
-from revos.skills.slots import resolve_tz, slot_text
+from revos.skills.slots import resolve_tz, slot_label
 from revos.slack.notifier import POSTED_TYPES
 
 # A run that ends one of these ways goes to a person, with an audit entry. Order matters.
@@ -82,6 +83,7 @@ INTERNAL = {"enrich", "score", "classify_reply", "suppress_contact", "cancel_sch
             "snooze_ooo", "reminder", "attach_case_study", "generate_io", "lesson_write"}
 WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 PLUS_TAG = re.compile(r"\+([0-9a-f]{8})@")
+CLOSED_STAGES = frozenset({"closed_won", "closed_lost", "do_not_contact", "handoff"})
 SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note", "book_meeting", "handoff"}
 FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
 EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role", "signer_name",
@@ -400,6 +402,8 @@ class Orchestrator:
             return ActionRequest(atype, io_validated=True,
                                  discount_pct=float(fields.get("discount_pct", 0) or 0))
         if atype == "book_meeting":
+            if "meeting_start" in fields:
+                raise ProposalRejected("a meeting is already booked for this deal")
             if payload.get("start") not in (fields.get("offered_slots") or []):
                 raise ProposalRejected("the time is not one we offered")
             return ActionRequest(atype)
@@ -428,7 +432,10 @@ class Orchestrator:
             start = (payload.get("invite") or {}).get("start")
             if start not in ((deal["fields"] or {}).get("offered_slots") or []):
                 return False                       # a time we never offered cannot be confirmed
-            extra = [slot_text(datetime.fromisoformat(start))]
+            # the time exactly as the prospect reads it, derived here from the database's own slot and zone
+            tz = resolve_tz(self.conn.execute("SELECT timezone FROM contacts WHERE id = %s",
+                                              (deal["contact_id"],)).fetchone()[0])
+            extra = [slot_label(datetime.fromisoformat(start), tz)]
         approved, names = check_inputs(pack, template, self.identity, deal["company_name"] or "",
                                        deal["contact_name"], study, extra)
         draft = Draft(payload["subject"], payload["body"], tuple(
@@ -931,14 +938,19 @@ class Orchestrator:
             return "held"
         return self._process_call(match.deal_id, transcript, list(match.by))
 
-    def _process_call(self, deal_id: UUID, transcript: Any, by: list[str]) -> str:
+    def _process_call(self, deal_id: UUID, transcript: Any, by: list[str],
+                      undo: Callable[[], None] | None = None) -> str:
+        """`undo` is set when the transcript row already exists (a reassignment): a failure puts it back."""
         transcript_id = transcript.id
-        first = self.conn.execute(
-            "INSERT INTO transcripts (deal_id, external_id, body) VALUES (%s, %s, %s) "
-            "ON CONFLICT (external_id) DO NOTHING RETURNING id", (deal_id, transcript_id,
-                                                                  transcript.text)).fetchone()
-        if first is None:
-            return "seen"
+        if undo is None:
+            first = self.conn.execute(
+                "INSERT INTO transcripts (deal_id, external_id, body) VALUES (%s, %s, %s) "
+                "ON CONFLICT (external_id) DO NOTHING RETURNING id", (deal_id, transcript_id,
+                                                                      transcript.text)).fetchone()
+            if first is None:
+                return "seen"
+            undo = lambda: self.conn.execute(      # noqa: E731
+                "DELETE FROM transcripts WHERE id = %s", (first[0],))
         write_audit(self.conn, "orchestrator", "call.matched", deal_id, {
             "transcript": transcript_id, "by": by})
         try:
@@ -954,9 +966,33 @@ class Orchestrator:
                     write_audit(self.conn, "orchestrator", "call.io", deal_id, {
                         "transcript": transcript_id, "result": io.status, "note": io.reason})
         except Exception:
-            self.conn.execute("DELETE FROM transcripts WHERE id = %s", (first[0],))   # let the poll retry
+            undo()                                                             # let the poll retry
             raise
         return "processed"
+
+    def reassign_call(self, transcript_id: str, deal_id: UUID, actor: str) -> str:
+        """Move a call that was handled for a CLOSED deal onto an open one and process it there, once.
+        Audited. A call on a live deal is never moved, and the old deal keeps its own record."""
+        row = self.conn.execute(
+            "SELECT t.id, t.deal_id, d.stage FROM transcripts t JOIN deals d ON d.id = t.deal_id "
+            "WHERE t.external_id = %s", (transcript_id,)).fetchone()
+        if row is None:
+            raise LookupError(f"no handled call {transcript_id}")
+        old_deal, old_stage = row[1], row[2]
+        if old_deal == deal_id:
+            return "seen"
+        if old_stage not in CLOSED_STAGES:
+            raise LookupError("that call belongs to a deal that is still open: not moved")
+        if DealStage(self._deal(deal_id)["stage"]).value in CLOSED_STAGES:
+            raise LookupError("the target deal is closed")
+        if self.transcripts is None or (transcript := self.transcripts.get(transcript_id)) is None:
+            raise LookupError(f"no transcript {transcript_id}")
+        self.conn.execute("UPDATE transcripts SET deal_id = %s, extracted = NULL WHERE id = %s",
+                          (deal_id, row[0]))
+        write_audit(self.conn, actor, "call.reassigned", deal_id, {
+            "transcript": transcript_id, "from_deal": str(old_deal), "from_stage": old_stage})
+        return self._process_call(deal_id, transcript, ["operator"], undo=lambda: self.conn.execute(
+            "UPDATE transcripts SET deal_id = %s WHERE id = %s", (old_deal, row[0])))
 
     def assign_held_call(self, transcript_id: str, deal_id: UUID, actor: str) -> str:
         """A person decides which deal a held call belongs to. Audited; the call is then processed
@@ -1013,7 +1049,33 @@ class Orchestrator:
         return lesson_loop.sweep_no_replies(self.conn, self.clock)
 
     # --- a customer reply -------------------------------------------------------------------------
-    def handle_reply(self, deal_id: UUID, email: Any) -> PipelineResult:
+    def reprocess_reply(self, deal_id: UUID, message_id: str, actor: str = "operator") -> PipelineResult:
+        """Handle a stored inbound reply again under a new agent step, after a bug that mishandled it was
+        fixed. Audited. Everything it sends keeps its idempotency key, so nothing goes out twice."""
+        row = self.conn.execute(
+            "SELECT message_id, in_reply_to, subject, body FROM messages WHERE deal_id = %s AND "
+            "direction = 'inbound' AND message_id = %s", (deal_id, message_id)).fetchone()
+        if row is None:
+            raise ValueError(f"no stored inbound message {message_id} on this deal")
+        # allowed only when the last handling left something for a person: it ended in needs_human, or its
+        # reply email was blocked/cancelled afterwards. Otherwise a second run would send things again.
+        left = self.conn.execute(
+            "WITH last AS (SELECT id, event, at FROM audit_log WHERE deal_id = %(d)s AND event IN "
+            "('pipeline.needs_human', 'reply.reprocessed') ORDER BY id DESC LIMIT 1) "
+            "SELECT (SELECT event FROM last) = 'pipeline.needs_human' OR EXISTS ("
+            "SELECT 1 FROM actions a, last WHERE a.deal_id = %(d)s AND a.type = 'follow_up' AND "
+            "a.status = 'cancelled' AND a.created_at >= last.at)", {"d": deal_id}).fetchone()[0]
+        if not left:
+            raise ValueError("this deal's last reply was not left for a person: nothing to reprocess")
+        runs = self.conn.execute("SELECT count(*) FROM agent_runs WHERE deal_id = %s AND agent = 'reply' "
+                                 "AND step LIKE %s", (deal_id, f"reply:{message_id}%")).fetchone()[0]
+        write_audit(self.conn, actor, "reply.reprocessed", deal_id, {"message_id": message_id,
+                                                                       "attempt": runs + 1})
+        email = SimpleNamespace(message_id=row[0], in_reply_to=row[1], subject=row[2], body=row[3],
+                                is_html=False)
+        return self.handle_reply(deal_id, email, attempt=runs + 1)
+
+    def handle_reply(self, deal_id: UUID, email: Any, attempt: int = 1) -> PipelineResult:
         """Wrap, store, classify and route an inbound email. Flagged text is quarantined, never
         obeyed. A duplicate delivery of the same message does nothing."""
         deal = self._deal(deal_id)
@@ -1037,7 +1099,7 @@ class Orchestrator:
 
         try:
             run = self.run_agent(
-                deal_id, "reply", f"reply:{email.message_id}",
+                deal_id, "reply", f"reply:{email.message_id}" + (f":r{attempt}" if attempt > 1 else ""),
                 input_={"message_id": email.message_id,
                         "original_subject": self._last_outbound_subject(deal_id)},
                 untrusted={"reply": reply})

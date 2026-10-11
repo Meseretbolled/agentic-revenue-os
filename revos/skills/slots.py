@@ -74,7 +74,7 @@ def match_slot(reply: UntrustedText, offered: Sequence[datetime]) -> datetime | 
     weekdays: set[int] = set()
     times: set[tuple[int, int | None]] = set()
     ordinal: int | None = None
-    for snippet in reply.snippets(PATTERN):
+    for snippet in reply.snippets(PATTERN, fresh_only=True):
         low = snippet.lower()
         if any(name in low for name in _WEEKDAYS):
             weekdays.add(next(i for i, n in enumerate(_WEEKDAYS) if n in low))

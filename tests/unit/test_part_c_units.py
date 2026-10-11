@@ -103,3 +103,18 @@ def test_the_handoff_has_summary_signer_terms_and_open_items() -> None:
                      "TEST MODE", "not legally binding", "raised on the call: attribution worries us",
                      "agree the kick-off", "replace the sample terms", "L4, L2"):
         assert expected in text, expected
+
+
+QUOTED_OFFER = (
+    "\n\nOn Sun, Oct 11, 2026 at 6:41 PM Jo Rivers <jo@example.com> wrote:\n\n"
+    "> Here are a few times that work on our side:\n"
+    "> - Tuesday 13 October, 11:00\n> - Tuesday 13 October, 11:30\n> - Tuesday 13 October, 12:00\n")
+
+
+def test_a_reply_that_quotes_all_the_offered_times_matches_only_the_one_it_names():
+    text = "Tuesday 13 October at 11:30 works for me" + QUOTED_OFFER
+    assert match_slot(reply(text), OFFERED) == OFFERED[1]
+
+
+def test_quoted_times_alone_do_not_count_as_a_choice():
+    assert match_slot(reply("Sounds good, thanks!" + QUOTED_OFFER), OFFERED) is None
