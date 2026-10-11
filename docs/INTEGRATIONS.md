@@ -69,8 +69,38 @@ Several of our stages share one HubSpot stage, so the exact one is also stored i
 
 ## Gmail (SMTP send, IMAP read)
 
-**Status: built and tested against a fake SMTP/IMAP server only. Nothing here has run against
-real Gmail yet.**
+**Status: send, `find_sent` and reply fetching have run against real Gmail (owner's run, then a
+header check). Everything else below is tested against a fake SMTP/IMAP server.**
+
+What real Gmail did:
+
+* `make live-gmail` passed: one email sent, and `find_sent` found it again by key.
+* `scripts/gmail_header_check.py --no-wait`: **Gmail kept our Message-ID** on the Sent copy, and kept
+  our `Reply-To` plus address (`name+d1a2b3c4@gmail.com`). So Gmail does not rewrite the id; the
+  real-id read-back is a safeguard that stays a no-op here.
+* In the first `gmail_reply_check.py` run the reply (Message-ID `<autogen-java-...@google.com>`, so
+  sent from a Gmail mobile app) was matched **by sender address only**, not by thread. The sent
+  id was intact, so either that client did not set In-Reply-To/References or the message fetched was
+  older mail from the same address. Two changes follow from that: the inbox now never searches for
+  or accepts mail dated before our first sent email (`not_before`), and replies are matched by the
+  plus tag as well. `scripts/gmail_header_check.py` (with a hand reply) prints the headers of the
+  Sent copy and of the reply so the actual cause is on record; see "Reply headers seen" below once
+  it has been run.
+
+### How a reply is matched to a deal
+
+All demo leads can share one prospect inbox, so the order matters and nothing is guessed:
+
+1. **Thread**: `In-Reply-To`/`References` name a message we sent (the id we set, or the one Gmail
+   stored, kept in `messages.real_message_id`).
+2. **Plus tag**: every email has `Reply-To: name+<first 8 chars of the deal id>@gmail.com`. A reply
+   to it arrives in the same inbox with the tag in `To`/`Cc`/`Delivered-To`. The tag is never a
+   recipient and the recipient allowlist is unchanged.
+3. **Sender**: only if exactly one open outreach deal (one that has sent an email) exists for that address.
+
+If a step finds more than one deal, the reply is **held** (table `held_replies`), audited as
+`inbound.ambiguous` (ids only, no content) and shown by `revos trace`. It is never attached to a
+deal. Follow-ups thread under the id the recipient actually sees.
 
 * **Send** (`smtp.gmail.com:465`, app password). The recipient is the contact row's address, never
   the payload, and must be in the demo allowlist (`PROSPECT_TEST_EMAIL` and the sender). The unsubscribe
@@ -96,21 +126,33 @@ exact `X-GM-RAW` and `HEADER` search syntax; `+X-GM-LABELS` creating the `revos-
 the folder name `"[Gmail]/Sent Mail"` (it is localised for some accounts); and how long a sent mail takes
 to appear in Sent (the live test waits up to 60 seconds).
 
+### What real HubSpot said (live run)
+
+`make live-hubspot` failed on creating a contact with `400 bad_request`. The error did not say why,
+so `HubSpotError` now carries HubSpot's own message, its category and the names of invalid
+properties (never values, headers or the token; at most 400 characters; a token in a body is
+scrubbed). The message was `INVALID_EMAIL` on `email`: **HubSpot rejects `.test` and `.example`
+email domains**. The live test now uses `example.com`, and then passed (one contact, company and
+deal created and cleaned up). Consequence: a demo lead whose contact email ends in `.example` will
+get its contact write refused (a permanent error, in the dead-letter list) while the company and
+deal writes still go through; for a real HubSpot run, give demo contacts a valid-looking address
+such as the prospect test inbox.
+
 ## Other services
 
 `revos doctor` checks each with one harmless read and prints one line: `REAL OK`, `REAL FAILED`
 (with a category such as `auth`, `timeout`, `network`) or `MOCK` (key missing). It never prints a
-value. Of these, **only HubSpot has been run against the real service so far.**
+value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dropbox Sign were `REAL OK`; Tavily failed (see below).
 
 | Service | What doctor calls | Status |
 |---|---|---|
 | Postgres | `SELECT 1` | seen working locally |
 | LLM budget | reads the spend ledger; never calls the model | not run with a live key |
-| Slack | `auth.test` | unverified live |
-| Gmail | IMAP login and logout only | unverified live (see the Gmail section) |
-| Fireflies | GraphQL `{ user { user_id } }` | unverified live |
-| Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | unverified live |
-| Tavily | one search with one result (uses one credit) | unverified live |
+| Slack | `auth.test` | REAL OK (owner's run) |
+| Gmail | IMAP login and logout only | REAL OK (owner's run) |
+| Fireflies | GraphQL `{ user { user_id } }` | REAL OK (owner's run) |
+| Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | REAL OK (owner's run) |
+| Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | our call matches Tavily's documented shape; the owner's key was answered 403, which doctor now reports as `key rejected` (check or regenerate the key) |
 | Tunnel URL | `GET <PUBLIC_BASE_URL>/health` | unverified live |
 
 ## Commands
@@ -118,6 +160,8 @@ value. Of these, **only HubSpot has been run against the real service so far.**
 ```
 revos doctor                       # one status per service
 revos hubspot-setup                # create the custom properties (safe to repeat)
+revos trace                        # recent audit entries, and replies held as ambiguous
+.venv/bin/python scripts/gmail_header_check.py  # prints Message-ID/In-Reply-To/References/To of the Sent copy and your reply
 revos reset-demo --hubspot         # delete ONLY records flagged revos_demo=true (asks first)
 make live-gmail                    # sends ONE email to PROSPECT_TEST_EMAIL, checks find_sent
 .venv/bin/python scripts/gmail_reply_check.py   # reply by hand; shows the reply fetched, matched, delivered once

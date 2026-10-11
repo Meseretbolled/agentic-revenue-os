@@ -102,11 +102,16 @@ def build_mail(conn: psycopg.Connection):
                          sender_name=identity.sender_name)
 
     def our_ids() -> list[str]:
-        return [r[0] for r in conn.execute(
-            "SELECT message_id FROM messages WHERE direction = 'outbound' AND message_id IS NOT NULL "
-            "ORDER BY id DESC LIMIT 100")]
+        # ours, and the id Gmail really gave each Sent copy when it differs
+        return [i for r in conn.execute(
+            "SELECT message_id, real_message_id FROM messages WHERE direction = 'outbound' AND "
+            "message_id IS NOT NULL ORDER BY id DESC LIMIT 100") for i in r if i]
 
-    inbox = GmailInbox(mailbox, our_message_ids=our_ids,
+    def first_sent():
+        return conn.execute("SELECT min(created_at) FROM messages WHERE direction = 'outbound'"
+                            ).fetchone()[0]
+
+    inbox = GmailInbox(mailbox, our_message_ids=our_ids, not_before=first_sent,
                        allowed_senders=frozenset({prospect} - {""}))
     return mailer, inbox
 

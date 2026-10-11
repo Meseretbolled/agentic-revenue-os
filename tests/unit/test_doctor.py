@@ -208,6 +208,21 @@ def test_tavily_plan_limits_and_the_tunnel() -> None:
     assert doctor.check_tunnel({}, http_with(ok_everywhere)) == Check("Tunnel URL", MOCK, "no public URL set")
 
 
+def test_tavily_says_key_rejected_for_401_and_403_and_sends_a_bearer_post_without_leaking() -> None:
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(403, json={"detail": {"error": "tvly-SECRET"}})
+
+    got = doctor.check_tavily({"TAVILY_API_KEY": ' "tvly-SECRET" '}, http_with(handler))
+    assert got == Check("Tavily", FAILED, "key rejected") and "SECRET" not in got.line()
+    assert seen[0].method == "POST" and str(seen[0].url) == "https://api.tavily.com/search"
+    assert seen[0].headers["Authorization"] == "Bearer tvly-SECRET"
+    assert doctor.check_tavily({"TAVILY_API_KEY": "k"}, http_with(lambda r: httpx.Response(401, json={}))
+                               ).detail == "key rejected"
+
+
 def test_postgres_down_is_a_real_failure() -> None:
     assert doctor.check_postgres({}, DB(ok=False)) == Check("Postgres", FAILED, "network")
 

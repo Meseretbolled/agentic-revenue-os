@@ -5,6 +5,7 @@ from the database, asks the policy engine, creates the outbox action, and applie
 effects. It is also the only caller of transition_deal for agent-driven moves.
 """
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
@@ -30,6 +31,7 @@ from revos.domain.errors import (
     LoopLimitExceeded,
     ProposalRejected,
     QuarantinedContent,
+    RevosError,
     SpendCapExceeded,
     ToolCallBlocked,
     WebhookRejected,
@@ -72,6 +74,7 @@ HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
 )
 INTERNAL = {"enrich", "score", "classify_reply", "suppress_contact", "cancel_scheduled_sends",
             "snooze_ooo", "reminder", "attach_case_study", "generate_io", "lesson_write"}
+PLUS_TAG = re.compile(r"\+([0-9a-f]{8})@")
 SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note", "book_meeting", "handoff"}
 FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
 EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role", "signer_name",
@@ -293,11 +296,14 @@ class Orchestrator:
     def _threaded(self, deal_id: UUID, atype: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Give a follow-up its place in the thread: In-Reply-To the message it answers (or our
         last one), and References listing the thread so far, oldest first."""
+        if atype in {"first_touch", "follow_up"}:
+            payload = {**payload, "deal_tag": str(deal_id)[:8]}      # goes in the Reply-To plus address
         if atype != "follow_up":
             return payload
+        # the id the recipient actually sees (Gmail may rewrite ours) is the one to thread under
         ids = [r[0] for r in self.conn.execute(
-            "SELECT message_id FROM messages WHERE deal_id = %s AND message_id IS NOT NULL ORDER BY id",
-            (deal_id,))]
+            "SELECT COALESCE(real_message_id, message_id) FROM messages WHERE deal_id = %s AND "
+            "message_id IS NOT NULL ORDER BY id", (deal_id,))]
         if not ids:
             return payload
         reply_to = payload.get("in_reply_to") or ids[-1]
@@ -897,36 +903,89 @@ class Orchestrator:
             self._crm_action(deal_id, None, key, "crm_note", {"record_id": str(deal_id), "text": text})
 
     # --- replies from the mailbox -----------------------------------------------------------------
-    def _deal_for_inbound(self, email: Any) -> UUID | None:
-        """Which deal an inbound message belongs to: the thread it answers, else the sender."""
+    def _deal_for_inbound(self, email: Any) -> tuple[UUID | None, str, list[UUID]]:
+        """Which deal an inbound message belongs to, and how we know:
+          1. thread: In-Reply-To / References name a message we sent (our id or the real one),
+          2. tag: the plus address it was sent to carries a short deal id,
+          3. sender: only if exactly one open outreach deal exists for that sender.
+        More than one candidate is never guessed: (None, "ambiguous", candidates)."""
         ids = [i for i in (*(email.references or ()), email.in_reply_to) if i]
         if ids:
-            row = self.conn.execute(
-                "SELECT deal_id FROM messages WHERE message_id = ANY(%s) AND deal_id IS NOT NULL "
-                "ORDER BY id DESC LIMIT 1", (ids,)).fetchone()
-            if row:
-                return row[0]
-        row = self.conn.execute(
+            rows = {r[0] for r in self.conn.execute(
+                "SELECT DISTINCT deal_id FROM messages WHERE deal_id IS NOT NULL AND direction = 'outbound' "
+                "AND (message_id = ANY(%s) OR real_message_id = ANY(%s))", (ids, ids))}
+            if len(rows) == 1:
+                return rows.pop(), "thread", []
+            if rows:
+                return None, "ambiguous", sorted(rows)
+        tags = {m for a in (email.to_addrs or (email.to,)) for m in PLUS_TAG.findall(a or "")}
+        if tags:
+            rows = {r[0] for t in tags for r in self.conn.execute(
+                "SELECT DISTINCT m.deal_id FROM messages m WHERE m.direction = 'outbound' AND "
+                "m.deal_id::text LIKE %s", (t + "%",))}
+            if len(rows) == 1:
+                return rows.pop(), "tag", []
+            if rows:
+                return None, "ambiguous", sorted(rows)
+        rows = [r[0] for r in self.conn.execute(
             "SELECT d.id FROM deals d JOIN contacts c ON c.id = d.contact_id "
             "WHERE lower(c.email) = %s AND d.stage NOT IN ('closed_lost', 'do_not_contact', 'handoff') "
-            "ORDER BY d.created_at DESC LIMIT 1", (email.from_addr.lower(),)).fetchone()
-        return row[0] if row else None
+            "AND EXISTS (SELECT 1 FROM messages m WHERE m.deal_id = d.id AND m.direction = 'outbound') "
+            "ORDER BY d.created_at", (email.from_addr.lower(),))]
+        if len(rows) == 1:
+            return rows[0], "sender", []
+        return (None, "ambiguous", rows) if rows else (None, "none", [])
 
     def poll_replies(self) -> list[PipelineResult]:
         """Fetch replies (the inbox itself returns only replies to our messages or mail from an
         allowlisted prospect), route each to its deal, handle it, and mark it delivered."""
         if self.inbox is None:
             return []
+        self.backfill_real_ids()
         results = []
         for email in self.inbox.poll():
-            deal_id = self._deal_for_inbound(email)
-            if deal_id is None:
+            deal_id, how, candidates = self._deal_for_inbound(email)
+            if deal_id is not None:
+                write_audit(self.conn, "orchestrator", "inbound.matched", deal_id,
+                            {"message_id": email.message_id, "by": how})
+                results.append(self.handle_reply(deal_id, email))
+            elif how == "ambiguous":
+                self._hold_reply(email, candidates)
+            else:
                 write_audit(self.conn, "orchestrator", "inbound.unmatched", None,
                             {"message_id": email.message_id})
-            else:
-                results.append(self.handle_reply(deal_id, email))
             self.inbox.mark_processed(email.message_id)       # only after it was handled
         return results
+
+    def _hold_reply(self, email: Any, candidates: list[UUID]) -> None:
+        """Several deals could own this reply: keep it as data for a person, attach it to none."""
+        with self.conn.transaction():
+            self.conn.execute(
+                "INSERT INTO held_replies (message_id, from_addr, subject, body, received_at, reason, "
+                "candidate_deal_ids) VALUES (%s, %s, %s, %s, %s, 'ambiguous', %s) "
+                "ON CONFLICT (message_id) DO NOTHING",
+                (email.message_id, email.from_addr, email.subject, email.body, email.received_at,
+                 candidates))
+            write_audit(self.conn, "orchestrator", "inbound.ambiguous", None, {
+                "message_id": email.message_id, "candidates": [str(c) for c in candidates]})
+
+    def backfill_real_ids(self) -> None:
+        """Record the Message-ID Gmail really assigned to each email we sent (when the Sent copy was
+        not visible yet at send time). A mailer that cannot say simply does nothing."""
+        mailer = getattr(self.provider, "provider_for", lambda _t: None)("first_touch")
+        reader = getattr(mailer, "actual_message_id", None)
+        if reader is None:
+            return
+        for message_id, key in self.conn.execute(
+                "SELECT m.message_id, a.idempotency_key FROM messages m JOIN actions a ON a.provider_id = "
+                "m.message_id WHERE m.direction = 'outbound' AND m.real_message_id IS NULL "
+                "ORDER BY m.id DESC LIMIT 20").fetchall():
+            self._store_real_id(message_id, reader(key))
+
+    def _store_real_id(self, message_id: str, real: str | None) -> None:
+        if real:
+            self.conn.execute("UPDATE messages SET real_message_id = %s WHERE message_id = %s",
+                              (real, message_id))
 
     # --- sending ----------------------------------------------------------------------------------
     def send_action(self, action_id: UUID) -> GateResult:
@@ -1005,6 +1064,19 @@ class Orchestrator:
                 "'open_objections', '[]'::jsonb)) v WHERE v <> '\"price_objection\"'::jsonb), "
                 "'[]'::jsonb)) WHERE id = %s", (action["deal_id"],))
 
+    def _read_back_real_id(self, atype: str, action_id: UUID, message_id: str) -> None:
+        """Ask the mailer which Message-ID the Sent copy really has and keep it beside ours."""
+        reader = getattr(getattr(self.provider, "provider_for", lambda _t: None)(atype),
+                         "actual_message_id", None)
+        if reader is None:
+            return
+        key = self.conn.execute("SELECT idempotency_key FROM actions WHERE id = %s",
+                                (action_id,)).fetchone()[0]
+        try:
+            self._store_real_id(message_id, reader(key))
+        except RevosError:
+            pass                                  # not visible yet: backfilled at the next poll
+
     def _record_sent_email(self, action_id: UUID, provider_id: str | None, pack: Pack) -> None:
         """Keep our own copy of what went out, and which case study (if any) it carried."""
         action = self.conn.cursor(row_factory=dict_row).execute(
@@ -1020,6 +1092,7 @@ class Orchestrator:
                 "ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING",
                 (action["deal_id"], action["contact_id"], provider_id, payload.get("in_reply_to"),
                  payload.get("subject"), payload.get("body")))
+            self._read_back_real_id(action["type"], action_id, provider_id)
             self._crm_note(action["deal_id"], f"{action_id}:note",
                            f"Email sent: {payload.get('subject')}\n\n{payload.get('body')}")
             slug = payload.get("case_study_id")

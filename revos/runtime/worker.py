@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 import psycopg
 
 from revos.adapters.clock import SystemClock
-from revos.db import connect
+from revos.db import connect, migrate
 from revos.domain.errors import PermanentError
 from revos.ports.clock import Clock
 from revos.runtime.queue import Job, claim_job, complete_job, fail_job
@@ -59,6 +59,7 @@ def main() -> None:
     load_env_file()
     clock = SystemClock()
     with connect() as conn, connect_read_only() as ro:
+        migrate(conn)                      # idempotent: a new release may add tables
         conn.autocommit = True
         worker = Worker(build_orchestrator(conn, ro, clock).handlers(), clock)
         last_tick = 0.0

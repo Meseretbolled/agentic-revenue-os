@@ -25,6 +25,7 @@ class OutboundEmail:
     in_reply_to: str | None = None
     attachments: tuple[Attachment, ...] = ()
     references: tuple[str, ...] = ()           # the whole thread so far, oldest first
+    deal_tag: str | None = None                # short deal id, carried in the Reply-To plus address
 
 
 def build_ics(uid: str, start: datetime, minutes: int, summary: str, attendee: str,
@@ -53,6 +54,7 @@ class InboundEmail:
     in_reply_to: str | None = None
     is_html: bool = False
     references: tuple[str, ...] = ()
+    to_addrs: tuple[str, ...] = ()             # every address it was sent to (To, Cc, Delivered-To)
 
 
 class Mailer(Protocol):

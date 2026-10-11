@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from revos.adapters.gmail.inbox import GmailInbox
 from revos.adapters.gmail.mailer import GmailMailer
@@ -51,7 +52,9 @@ def main() -> int:
                                          "revos reply check: please reply", body))
         print(f"Sent {ours} to {prospect}. Reply to it from that inbox now.")
 
-    inbox = GmailInbox(mailbox, our_message_ids=lambda: [ours], allowed_senders=frozenset({prospect}))
+    started = datetime.now(UTC) - timedelta(minutes=2)
+    inbox = GmailInbox(mailbox, our_message_ids=lambda: [ours], allowed_senders=frozenset({prospect}),
+                       not_before=lambda: started)       # older mail from that address is not a reply
     deadline = time.time() + args.wait
     found = []
     while not found and time.time() < deadline:

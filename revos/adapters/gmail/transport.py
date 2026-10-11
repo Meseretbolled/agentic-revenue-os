@@ -5,6 +5,7 @@ password in an error, a log line or a repr."""
 
 import imaplib
 import smtplib
+from datetime import date
 from email.message import EmailMessage
 from typing import Protocol
 
@@ -31,12 +32,16 @@ class SmtpTransport(Protocol):
 class Mailbox(Protocol):
     """The few IMAP questions we ask. Each returns UIDs or one message, never a listing."""
 
+    def sent_uids(self, message_id: str, key_token: str) -> list[int]:
+        """The Sent copies of one email: found by the Message-ID we set, else by X-Revos-Key."""
+        ...
+
     def has_sent(self, message_id: str, key_token: str) -> bool:
         """Is a message with this Message-ID (or our key header) in the Sent mailbox?"""
         ...
 
-    def uids_from(self, folder: str, address: str) -> list[int]:
-        """Unprocessed messages in `folder` from exactly this address."""
+    def uids_from(self, folder: str, address: str, since: date | None = None) -> list[int]:
+        """Unprocessed messages in `folder` from exactly this address, from `since` (a day) on."""
         ...
 
     def uids_replying_to(self, folder: str, message_id: str) -> list[int]:
@@ -115,18 +120,22 @@ class ImapMailbox:
         except (imaplib.IMAP4.error, OSError):
             pass
 
-    def has_sent(self, message_id: str, key_token: str) -> bool:
+    def sent_uids(self, message_id: str, key_token: str) -> list[int]:
         client = self._session(SENT)
         try:
-            return bool(self._uids(client, "X-GM-RAW", f'"rfc822msgid:{message_id}"')
-                        or self._uids(client, "HEADER", "X-Revos-Key", key_token))
+            return (self._uids(client, "X-GM-RAW", f'"rfc822msgid:{message_id}"')
+                    or self._uids(client, "HEADER", "X-Revos-Key", key_token))
         finally:
             self._close(client)
 
-    def uids_from(self, folder: str, address: str) -> list[int]:
+    def has_sent(self, message_id: str, key_token: str) -> bool:
+        return bool(self.sent_uids(message_id, key_token))
+
+    def uids_from(self, folder: str, address: str, since: date | None = None) -> list[int]:
         client = self._session(folder)
         try:
-            return self._uids(client, "X-GM-RAW", f'"from:{address} -label:{PROCESSED_LABEL}"')
+            after = f" after:{since:%Y/%m/%d}" if since else ""
+            return self._uids(client, "X-GM-RAW", f'"from:{address} -label:{PROCESSED_LABEL}{after}"')
         finally:
             self._close(client)
 

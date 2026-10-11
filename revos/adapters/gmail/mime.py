@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
-from email.utils import formatdate, parseaddr, parsedate_to_datetime
+from email.utils import formatdate, getaddresses, parseaddr, parsedate_to_datetime
 
 from revos.ports.mail import Attachment, InboundEmail
 
@@ -22,7 +22,8 @@ def key_token(idempotency_key: str) -> str:
 
 def build_message(*, sender: str, to: str, subject: str, body: str, message_id: str, token: str,
                   in_reply_to: str | None = None, references: Sequence[str] = (),
-                  attachments: Sequence[Attachment] = (), sender_name: str | None = None) -> EmailMessage:
+                  attachments: Sequence[Attachment] = (), sender_name: str | None = None,
+                  reply_to: str | None = None) -> EmailMessage:
     msg = EmailMessage()
     msg["From"] = f"{sender_name} <{sender}>" if sender_name else sender
     msg["To"] = to
@@ -30,6 +31,8 @@ def build_message(*, sender: str, to: str, subject: str, body: str, message_id: 
     msg["Date"] = formatdate(localtime=False)
     msg["Message-ID"] = message_id
     msg["X-Revos-Key"] = token
+    if reply_to:
+        msg["Reply-To"] = reply_to
     msg["List-Unsubscribe"] = f"<mailto:{sender}?subject=unsubscribe>"
     if in_reply_to:
         chain = [r for r in references if r != in_reply_to] + [in_reply_to]
@@ -65,4 +68,6 @@ def parse_message(raw: bytes) -> InboundEmail:
         message_id=ids[0] if ids else "", from_addr=parseaddr(msg["From"] or "")[1].lower(),
         to=parseaddr(msg["To"] or "")[1].lower(), subject=str(msg["Subject"] or ""), body=body,
         received_at=received, in_reply_to=reply_to[0] if reply_to else None, is_html=is_html,
-        references=message_ids(msg["References"]))
+        references=message_ids(msg["References"]),
+        to_addrs=tuple(dict.fromkeys(a.lower() for _, a in getaddresses(
+            [str(msg[h]) for h in ("To", "Cc", "Delivered-To") if msg[h]]) if a)))

@@ -123,6 +123,28 @@ def reset_demo_command(
     typer.echo("deleted: " + ", ".join(f"{n} {k}" for k, n in counts.items()))
 
 
+@app.command("trace")
+def trace(deal: str = typer.Option(None, help="only this deal id"),
+          limit: int = typer.Option(40, help="how many audit entries")) -> None:
+    """Recent audit entries, then replies held as ambiguous (matched to no deal)."""
+    from revos.db import migrate
+    from revos.trace import audit_trail, held_replies
+    with connect() as conn:
+        migrate(conn)
+        entries, held = audit_trail(conn, deal, limit), held_replies(conn)
+    table = Table("at", "actor", "event", "deal", "detail")
+    for e in entries:
+        table.add_row(e["at"].strftime("%m-%d %H:%M:%S"), e["actor"], e["event"],
+                      str(e["deal_id"] or "")[:8], str(e["detail"])[:80])
+    console = Console()
+    console.print(table)
+    if held:
+        console.print(f"[bold]{len(held)} reply(ies) held: more than one deal could own them[/bold]")
+        for h in held:
+            console.print(f"  {h['message_id']} from {h['from_addr']}: {(h['subject'] or '')[:60]!r} "
+                          f"candidates: {', '.join(str(c)[:8] for c in h['candidate_deal_ids'])}")
+
+
 @app.callback()
 def root() -> None:
     """Agentic Revenue OS command line."""

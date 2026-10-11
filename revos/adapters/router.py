@@ -20,6 +20,9 @@ class ActionRouter:
                 return hit
         return None
 
+    def provider_for(self, action_type: str) -> ActionProvider | None:
+        return self._routes.get(action_type)
+
     def find_for(self, action: Mapping[str, Any]) -> str | None:
         """Ask only the provider that owns this action's type, so an outage at one provider (the
         CRM) can never stop an action that belongs to another (the mail server)."""

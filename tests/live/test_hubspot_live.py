@@ -52,7 +52,7 @@ def test_one_fictional_contact_company_and_deal_round_trip_and_clean_up(client) 
     deal_uuid = str(uuid.uuid4())
     created: list[tuple[str, str]] = []
     try:
-        contact, was_created = crm.upsert_contact(f"revos-live-{tag}@example.test",
+        contact, was_created = crm.upsert_contact(f"revos-live-{tag}@example.com",
                                                   {"firstname": "Livetest", "lastname": "Fictional"}, f"live-c-{tag}")
         created.append(("contacts", contact))
         company, _ = crm.upsert_company(f"revos-live-{tag}.example", {"name": f"Revos Live Test {tag}"},

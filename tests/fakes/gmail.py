@@ -30,6 +30,7 @@ class FakeGmail:
         self.crash_after_submit = False                # accept the mail, then drop the connection
         self.rewrite_message_id = False                # a server that replaces our Message-ID
         self.refuse: str | None = None                 # "recipient" | "auth" | "disconnect"
+        self.hide_sent = False                         # the Sent copy is not visible yet
         self.lax_header_search = False                 # a search that also matches unrelated mail
         self._uid = 100
 
@@ -48,10 +49,13 @@ class FakeGmail:
 
     # --- helpers for tests ---------------------------------------------------------------------
     def deliver(self, *, message_id: str, from_addr: str, subject: str, body: str, to: str = "me@gmail.test",
-                in_reply_to: str | None = None, references: tuple[str, ...] = ()) -> int:
+                in_reply_to: str | None = None, references: tuple[str, ...] = (),
+                delivered_to: str | None = None, date: str | None = None) -> int:
         msg = EmailMessage()
         msg["From"], msg["To"], msg["Subject"] = from_addr, to, subject
-        msg["Date"], msg["Message-ID"] = formatdate(), message_id
+        if delivered_to:
+            msg["Delivered-To"] = delivered_to
+        msg["Date"], msg["Message-ID"] = date or formatdate(), message_id
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
         if references:
@@ -92,18 +96,22 @@ class FakeSmtp:
 class FakeMailbox:
     def __init__(self, server: FakeGmail) -> None:
         self._s = server
+        self.searched_since: list = []
+
+    def sent_uids(self, message_id: str, key_token: str) -> list[int]:
+        if self._s.hide_sent:
+            return []
+        found = [i.uid for i in self._s.folders[SENT] if i.headers()["Message-ID"] == message_id]
+        return found or [i.uid for i in self._s.folders[SENT] if i.headers()["X-Revos-Key"] == key_token]
 
     def has_sent(self, message_id: str, key_token: str) -> bool:
-        for item in self._s.folders[SENT]:
-            head = item.headers()
-            if head["Message-ID"] == message_id or head["X-Revos-Key"] == key_token:
-                return True
-        return False
+        return bool(self.sent_uids(message_id, key_token))
 
     def _pending(self, folder: str):
         return [i for i in self._s.folders[folder] if "revos-processed" not in i.labels]
 
-    def uids_from(self, folder: str, address: str) -> list[int]:
+    def uids_from(self, folder: str, address: str, since=None) -> list[int]:
+        self.searched_since.append(since)
         return [i.uid for i in self._pending(folder)
                 if address.lower() in (i.headers()["From"] or "").lower()]
 

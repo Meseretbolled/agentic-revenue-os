@@ -279,3 +279,38 @@ def test_a_permission_error_is_reported_not_retried(rig) -> None:
     with pytest.raises(HubSpotError) as err:
         crm.upsert_contact("a@x.example", {}, "k")
     assert err.value.category == "forbidden" and slept == []
+
+
+# --- why HubSpot said no -------------------------------------------------------------------------
+
+def test_a_400_carries_hubspots_message_category_and_invalid_property_names() -> None:
+    body = {"status": "error", "category": "VALIDATION_ERROR",
+            "message": 'Property values were not valid: [{"isValid":false,"name":"revos_demo"}]',
+            "errors": [{"message": "Property \"revos_demo\" is not a valid option", "name": "revos_demo",
+                        "in": "SECRET-VALUE-123"}],
+            "context": {"propertyName": ["lifecyclestage"]}}
+    fake = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(400, json=body)))
+    client = HubSpotClient(TOKEN, http=fake, sleep=lambda s: None)
+    with pytest.raises(HubSpotError) as caught:
+        client.request("POST", "/crm/v3/objects/contacts", json={})
+    text = str(caught.value)
+    assert "Property values were not valid" in text and "VALIDATION_ERROR" in text
+    assert "revos_demo" in text and "lifecyclestage" in text
+    assert "SECRET-VALUE-123" not in text and caught.value.status == 400
+
+
+def test_a_token_echoed_in_an_error_body_is_scrubbed_and_the_detail_is_truncated() -> None:
+    body = {"message": f"bad header Bearer {TOKEN} " + "x" * 2000}
+    fake = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(400, json=body)))
+    client = HubSpotClient(TOKEN, http=fake, sleep=lambda s: None)
+    with pytest.raises(HubSpotError) as caught:
+        client.request("GET", "/x")
+    assert TOKEN not in str(caught.value) and "[token]" in str(caught.value)
+    assert len(caught.value.detail) <= 400
+
+
+def test_a_non_json_error_body_gives_no_detail() -> None:
+    fake = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(400, text="<html>nope")))
+    with pytest.raises(HubSpotError) as caught:
+        HubSpotClient(TOKEN, http=fake, sleep=lambda s: None).request("GET", "/x")
+    assert caught.value.detail == "" and "nope" not in str(caught.value)

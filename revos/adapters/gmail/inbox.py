@@ -8,6 +8,7 @@ deliver are labelled `revos-processed`, and the search excludes that label, so e
 once. (The orchestrator also ignores a Message-ID it has already handled.)"""
 
 from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 
 from revos.adapters.gmail.mime import parse_message
 from revos.adapters.gmail.transport import INBOX, PROCESSED_LABEL, Mailbox
@@ -18,7 +19,11 @@ MAX_THREAD_IDS = 100
 
 class GmailInbox:
     def __init__(self, mailbox: Mailbox, *, our_message_ids: Callable[[], Iterable[str]],
-                 allowed_senders: frozenset[str]) -> None:
+                 allowed_senders: frozenset[str],
+                 not_before: Callable[[], datetime | None] = lambda: None) -> None:
+        """`not_before`: mail dated earlier than this (the first email we sent) is old mail from the
+        same address, not a reply: it is not even searched for, and is dropped if the server returns it."""
+        self._not_before = not_before
         self._mailbox = mailbox
         self._ours = our_message_ids
         self._senders = frozenset(a.strip().lower() for a in allowed_senders)
@@ -30,8 +35,9 @@ class GmailInbox:
     def poll(self) -> list[InboundEmail]:
         ours = list(dict.fromkeys(self._ours()))[-MAX_THREAD_IDS:]
         candidates: set[int] = set()
+        floor = self._not_before()
         for sender in sorted(self._senders):
-            candidates |= set(self._mailbox.uids_from(INBOX, sender))
+            candidates |= set(self._mailbox.uids_from(INBOX, sender, floor.date() if floor else None))
         for message_id in ours:
             candidates |= set(self._mailbox.uids_replying_to(INBOX, message_id))
         mine = set(ours)
@@ -40,7 +46,7 @@ class GmailInbox:
             email = parse_message(self._mailbox.fetch(INBOX, uid))
             relevant = email.from_addr in self._senders or bool(
                 mine & {*(email.references or ()), *([email.in_reply_to] if email.in_reply_to else [])})
-            if not relevant or not email.message_id:
+            if not relevant or not email.message_id or (floor and _aware(email.received_at) < floor):
                 continue                       # the server matched loosely: drop it, keep nothing
             self._uids[email.message_id] = uid
             delivered.append(email)
@@ -55,3 +61,7 @@ class GmailInbox:
             uid = found[0]
         self._mailbox.add_label(INBOX, uid, PROCESSED_LABEL)
         self._uids.pop(message_id, None)
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)

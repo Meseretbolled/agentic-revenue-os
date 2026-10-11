@@ -1,7 +1,8 @@
 """A small HubSpot REST client: timeouts, retries with backoff on 429 and 5xx, pagination.
 
 The token is held privately and is never put in an error, a log line or a repr. Errors carry the
-status and a category, never a response body (which can echo record values)."""
+status, a category, and for a 4xx HubSpot's own message, its category and the NAMES of invalid
+properties (truncated, token scrubbed). Never property values, headers or the token."""
 
 import random
 import time
@@ -22,13 +23,41 @@ def category_for(status: int) -> str:
             429: "rate_limited"}.get(status, "server_error" if status >= 500 else f"http_{status}")
 
 
+MAX_DETAIL = 400
+
+
+def error_detail(body: Any, token: str = "") -> str:
+    """What HubSpot said was wrong, from an error body: its message, its category and the names of
+    the invalid properties. Never a property value, and never the token."""
+    if not isinstance(body, dict):
+        return ""
+    parts: list[str] = []
+    if isinstance(body.get("message"), str):
+        parts.append(body["message"])
+    if isinstance(body.get("category"), str):
+        parts.append(f"category={body['category']}")
+    names = sorted({str(i["name"]) for i in body.get("errors", []) if isinstance(i, dict) and i.get("name")}
+                   | {str(i["name"]) for i in body.get("context", {}).get("properties", [])
+                      if isinstance(i, dict) and i.get("name")}
+                   | {str(n) for n in (body.get("context") or {}).get("propertyName", []) if n}
+                   ) if isinstance(body.get("context", {}), dict) else []
+    if names:
+        parts.append("invalid properties: " + ", ".join(names))
+    text = " | ".join(parts)
+    if token:
+        text = text.replace(token, "[token]")
+    return " ".join(text.split())[:MAX_DETAIL]
+
+
 class HubSpotError(PermanentError):
     """A request HubSpot refused for good (a 4xx other than 429). Never retried."""
 
-    def __init__(self, status: int, what: str) -> None:
+    def __init__(self, status: int, what: str, detail: str = "") -> None:
         self.status = status
         self.category = category_for(status)
-        super().__init__(f"HubSpot {what} failed: {status} {self.category}")
+        self.detail = detail
+        super().__init__(f"HubSpot {what} failed: {status} {self.category}"
+                         + (f" ({detail})" if detail else ""))
 
 
 class HubSpotUnavailable(RevosError):
@@ -52,6 +81,12 @@ class HubSpotClient:
 
     def __repr__(self) -> str:                     # never show the token
         return f"HubSpotClient(base_url={self.base_url!r})"
+
+    def _detail(self, response: httpx.Response) -> str:
+        try:
+            return error_detail(response.json(), self._token)
+        except ValueError:
+            return ""
 
     def _delay(self, attempt: int, retry_after: str | None) -> float:
         if retry_after and retry_after.replace(".", "", 1).isdigit():
@@ -94,7 +129,7 @@ class HubSpotClient:
                 retry_after = response.headers.get("Retry-After")
                 continue
             if response.status_code >= 400:
-                raise HubSpotError(response.status_code, label)
+                raise HubSpotError(response.status_code, label, self._detail(response))
             if response.status_code == 204 or not response.content:
                 return None
             return response.json()

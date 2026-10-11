@@ -167,13 +167,16 @@ def check_dropbox_sign(env: Mapping[str, str], http: httpx.Client) -> Check:
 def check_tavily(env: Mapping[str, str], http: httpx.Client) -> Check:
     if not _present(env, "TAVILY_API_KEY"):
         return Check("Tavily", MOCK, "key missing")
+    key = env["TAVILY_API_KEY"].strip().strip("\"'")
     try:
         got = http.post("https://api.tavily.com/search", json={"query": "revos doctor", "max_results": 1},
-                        headers={"Authorization": f"Bearer {env['TAVILY_API_KEY']}"}, timeout=TIMEOUT)
+                        headers={"Authorization": f"Bearer {key}"}, timeout=TIMEOUT)
     except httpx.HTTPError as exc:
         return Check("Tavily", FAILED, _http_failure(exc))
     if got.status_code == 200:
         return Check("Tavily", OK, "one search credit used")
+    if got.status_code in (401, 403):      # Tavily answers a bad or revoked key with 401 or 403
+        return Check("Tavily", FAILED, "key rejected")
     return Check("Tavily", FAILED, "plan_limit" if got.status_code in (432, 433)
                  else category_for(got.status_code))
 
