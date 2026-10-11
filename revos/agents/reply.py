@@ -50,7 +50,7 @@ def run(env: AgentEnv) -> AgentOutput:
             "source": "stated" if until else "default"}, [], "auto-reply: wait, then follow up"))
     elif label == "price_objection":
         deal = env.tools.call("crm.get_deal", {"deal_id": str(d)})
-        tags = match_tags(deal["fields"])
+        tags = [*match_tags(deal["fields"]), "price", "cpm", "performance"]
         picked = env.tools.call("casestudies.pick", {
             "tags": tags, "query": " ".join(tags), "situation": "price_objection"})["case_study"]
         study = next((s for s in env.pack.case_studies if picked and s.id == picked["id"]), None)

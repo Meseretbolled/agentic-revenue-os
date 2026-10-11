@@ -83,6 +83,7 @@ class FirefliesShaped:
 def test_a_fireflies_shaped_source_is_a_drop_in_replacement(conn, ro_conn, pack, clock):
     rig = make_rig(conn, ro_conn, pack, clock)
     rig.orch.transcripts = FirefliesShaped(FIREFLIES_JSON)
+    conn.execute("UPDATE deals SET fields = fields || '{\"signer_name\": \"Pat Doe\", \"signer_role\": \"CFO\"}'")   # the lead record's signer
     assert rig.orch.handle_transcript(rig.deal_id, "ff-1").status == "completed"
     fields = conn.execute("SELECT fields FROM deals").fetchone()[0]
     assert "fifty thousand" in fields["budget"] and fields["quote:budget"].startswith("Our budget")
@@ -116,6 +117,7 @@ class InventsABudget(FakeLLM):
 
 def test_a_value_whose_quote_is_not_in_the_transcript_is_dropped(conn, ro_conn, pack, clock):
     rig = make_rig(conn, ro_conn, pack, clock, llm=InventsABudget())
+    conn.execute("UPDATE deals SET fields = fields || '{\"signer_name\": \"Pat Doe\", \"signer_role\": \"CFO\"}'")   # the lead record's signer
     assert rig.orch.handle_transcript(rig.deal_id, "call-001").status == "completed"
     fields = conn.execute("SELECT fields FROM deals").fetchone()[0]
     assert "budget" not in fields and "quote:budget" not in fields

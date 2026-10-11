@@ -112,7 +112,9 @@ def draft_prompt(request: DraftRequest) -> str:
             f"{request.context.get('company', 'their company')}. Plain, specific, no hype, no questions "
             f"about their budget, no promises. Use only facts from the evidence below; do not add "
             f"numbers, dates, names, prices or results that are not in it. Do not write a greeting, a "
-            f"sign-off, meeting times, links, an unsubscribe line or an address.{angle}{tone}{lessons}"
+            f"sign-off, meeting times, links, an unsubscribe line or an address. Write statements only: "
+            f"no question mark and no request (the email's own closing line makes the one ask)."
+            f"{angle}{tone}{lessons}"
             f"{demo_rule}{reply}\nEvidence:\n{evidence}{feedback}\n"
             'Return {"personalised_line": str, "claims": [{"text": exact words from the line that state a '
             'fact about the prospect, "evidence": [ids]}]}. If you state no fact about them, claims is [].')

@@ -35,27 +35,25 @@ def test_rate_card_is_labelled_as_a_sample(pack) -> None:
     assert "SAMPLE" in pack.templates["io"] and "{{ rate_card_label }}" in pack.templates["io"]
 
 
-def test_every_case_study_has_a_source_link_and_the_testimonial_label(pack) -> None:
+def test_every_case_study_has_a_source_link_a_label_and_is_verified(pack) -> None:
     for study in pack.case_studies:
-        assert study.source_url.startswith("https://cool.co")
-        assert study.label == "public testimonial"
-        assert study.source_verified is False        # not matched to an exact page yet
+        assert study.source_url.startswith("https://cool.co/")
+        assert study.label in {"vendor-reported", "public testimonial"}
+        assert study.source_verified is True
+        assert study.tags
 
 
 def test_case_study_facts_are_only_those_in_the_brief(pack) -> None:
     by_id = {c.id: c for c in pack.case_studies}
     assert {c.id for c in pack.case_studies} == {
-        "global_beauty_brand", "celebree", "nhn", "pearle_vision", "campanile", "renault",
-        "air_france"}
+        "global_beauty_brand", "ethos_veterinary_health", "luxury_retail_brand", "pearle_vision"}
     beauty = by_id["global_beauty_brand"]
     assert [(m.label, m.value) for m in beauty.metrics] == [
         ("ROAS", "$15.52 vs $3.80"), ("CPA", "$19.23 vs $87.64")]
     assert beauty.quote_dollar_figures_only
     assert "339" not in str(beauty) and "79%" not in str(beauty)     # the page's wrong percentages
-    assert by_id["celebree"].metrics[0].value == "17.5% more"
-    assert by_id["nhn"].metrics[0].value == "50% uptick"
-    assert by_id["air_france"].metrics[0].value == "100+ markets in 25 languages"
     assert by_id["pearle_vision"].metrics == []
+    assert by_id["global_beauty_brand"].tags == ["price", "cpm", "performance"]
 
 
 def test_all_email_templates_carry_unsubscribe_and_postal_lines(pack) -> None:
@@ -107,7 +105,7 @@ def dup_rule(d): d["intent_rules"][0]["id"] = d["fit_rules"][0]["id"]
 def bad_reason(d): d["fit_rules"][0]["reason"] = "has {nope} placeholder"
 def extra_key(d): d["wieghts"] = {}
 def no_source(d): del d["case_studies"][0]["source_url"]
-def bad_label(d): d["case_studies"][1]["label"] = "verified result"
+def bad_label(d): d["case_studies"][1]["label"] = "independently audited"
 def percent_in_dollar_only(d): d["case_studies"][0]["metrics"][0]["value"] = "339% increase"
 def unlabelled_rate_card(d): d["label"] = "Rate card"
 def unknown_stage(d): d["exit_criteria"]["limbo"] = ["x"]
@@ -141,7 +139,7 @@ INVALID = [
     ("icp.yaml", bad_reason, "fit_rules.0.reason", "{value}"),
     ("icp.yaml", extra_key, "wieghts", "Extra inputs"),
     ("case_studies.yaml", no_source, "case_studies.0.source_url", "required"),
-    ("case_studies.yaml", bad_label, "case_studies.1.label", "public testimonial"),
+    ("case_studies.yaml", bad_label, "case_studies.1.label", "vendor-reported"),
     ("case_studies.yaml", percent_in_dollar_only, "case_studies.0", "dollar figures only"),
     ("rate_card.yaml", unlabelled_rate_card, "label", "SAMPLE"),
     ("stages.yaml", unknown_stage, "exit_criteria", "limbo"),

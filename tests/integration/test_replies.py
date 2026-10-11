@@ -113,7 +113,7 @@ def test_the_price_objection_email_carries_the_matching_case_study_and_only_its_
     assert sent.to == "sam.lee@brightside-optical.example"
     assert sent.subject == "Re: Scaling local campaigns at Brightside Optical Group"   # our own subject
     for stored in ("Global Beauty Brand", "ROAS: $15.52 vs $3.80", "CPA: $19.23 vs $87.64",
-                   "public testimonial", "https://cool.co/"):
+                   "vendor-reported", "https://cool.co/cool-ai/"):
         assert stored in sent.body
     assert "339" not in sent.body and "79%" not in sent.body            # the page's wrong percentages
     study = next(c for c in pack.case_studies if c.id == "global_beauty_brand")
@@ -135,7 +135,7 @@ def test_the_send_is_recorded_against_the_deal_and_the_case_study(conn, ro_conn,
         "SELECT cs.slug, cs.label, cs.source_url, s.deal_id, s.action_id, m.direction, m.in_reply_to "
         "FROM case_study_sends s JOIN case_studies cs ON cs.id = s.case_study_id "
         "JOIN messages m ON m.id = s.message_id WHERE s.action_id = %s", (action_id,)).fetchall()
-    assert rows == [("global_beauty_brand", "public testimonial", "https://cool.co/", rig.deal_id,
+    assert rows == [("global_beauty_brand", "vendor-reported", "https://cool.co/cool-ai/", rig.deal_id,
                      action_id, "outbound", "<p1@brightside-optical.example>")]
     assert conn.execute("SELECT count(*) FROM case_study_sends").fetchone()[0] == 2     # + first touch
     assert conn.execute("SELECT count(*) FROM case_studies").fetchone()[0] == 2        # each synced once
@@ -189,9 +189,9 @@ def test_the_picker_chooses_by_situation_then_by_tags(conn, ro_conn, pack, clock
     assert pick(conn, ro_conn, pack, rig.deal_id, situation="price_objection"
                 )["case_study"]["id"] == "global_beauty_brand"
     assert pick(conn, ro_conn, pack, rig.deal_id, situation="first_touch", tags=["franchise"]
-                )["case_study"]["id"] in {"pearle_vision", "renault"}
+                )["case_study"]["id"] == "ethos_veterinary_health"
     assert pick(conn, ro_conn, pack, rig.deal_id, situation="legal_question")["case_study"] is None
-    assert pick(conn, ro_conn, pack, rig.deal_id, tags=["roas"])["case_study"]["id"] \
+    assert pick(conn, ro_conn, pack, rig.deal_id, tags=["performance"])["case_study"]["id"] \
         == "global_beauty_brand"                                       # no situation: tags still work
 
 

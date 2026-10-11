@@ -94,8 +94,14 @@ def _ordinary_opener(text: str, m: re.Match[str], low: str) -> bool:
     return low in OPENERS or (low.endswith("ing") and len(low) > 5)
 
 
+_URL = re.compile(r"https?://\S+")
+
+
 def extract_tokens(text: str) -> list[Token]:
-    """Every number, date and proper noun in `text`, found by code."""
+    """Every number, date and proper noun in `text`, found by code. A link is not prose: the digits and
+    words in a URL (".../2026/06/...") are neither figures nor names, so they neither need approval nor
+    grant it."""
+    text = _URL.sub(lambda m: " " * len(m.group(0)), text)
     tokens: list[Token] = []
     covered: list[tuple[int, int]] = []
     for m in _NUMBER.finditer(text):

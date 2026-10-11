@@ -41,7 +41,10 @@ def pick(ctx: ToolContext, scope: RunScope, args: dict[str, Any]) -> dict[str, A
     def score(study: CaseStudy) -> int:
         text = set(re.findall(r"[a-z0-9]{3,}", f"{study.customer} {study.summary}".casefold()))
         fit = 10 if situation and situation in {u.casefold() for u in study.use_for} else 0
-        return fit + 2 * len(tags & {t.casefold() for t in study.tags}) + len(words & text)
+        matched = tags & {t.casefold() for t in study.tags}
+        # a tag that names the lead's situation counts double; "general" only breaks ties for anyone
+        points = sum(1 if t == "general" else 2 for t in matched)
+        return fit + points + len(words & text)
 
     ranked = sorted(((score(s), s) for s in _library(ctx, scope) if s.id not in sent),
                     key=lambda p: (-p[0], p[1].id))

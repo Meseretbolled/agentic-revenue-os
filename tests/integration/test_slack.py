@@ -54,7 +54,7 @@ def test_an_auto_with_veto_action_is_posted_with_a_short_header_and_the_button_r
     # compact summary right below: tier, score, the top reason, subject, case study
     summary = post.blocks[2]["text"]["text"]
     assert "Tier A · 83/100" in summary and "Subject:" in summary and "Scaling local campaigns" in summary
-    assert "Pearle Vision (public testimonial)" in summary and "[fit]" in summary
+    assert "Ethos Veterinary Health (vendor-reported)" in summary and "[fit]" in summary
     # the detail is under the button, in small print
     assert any(b["type"] == "context" and "Why this lead" in json.dumps(b) and "Draft" in json.dumps(b)
                for b in post.blocks[3:])

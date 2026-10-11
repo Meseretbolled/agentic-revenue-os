@@ -87,7 +87,7 @@ CLOSED_STAGES = frozenset({"closed_won", "closed_lost", "do_not_contact", "hando
 SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note", "book_meeting", "handoff"}
 FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
 EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role", "signer_name",
-                "signer_role"}
+                "signer_name_source", "signer_role"}
 # What the IO is built from: a change to any of these is a new IO run.
 IO_KEYS = ("io_items", "io_package", "io_start_date", "io_end_date", "discount_pct", "signer_email",
            "signer_name", "signer_role", "budget", "timeline", "decision_maker", "needs")
@@ -903,6 +903,8 @@ class Orchestrator:
                 if name in quotes:
                     self._learn(deal_id, f"know:{transcript_id}:{name}", quotes[name],
                                 f"{transcript_id}#{name}", "call", runs)
+            if run.output.get("handoff"):            # the fields stand, but a person must say who signs
+                return done("needs_human", run.output["handoff"])
             return done("completed")
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
             return done("needs_human", f"{cause_of(exc)}: {exc}")

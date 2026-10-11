@@ -246,6 +246,8 @@ def test_met_criteria_move_meeting_to_qualified_through_the_state_machine(conn, 
 
 def test_missing_criteria_hold_the_deal_and_say_what_is_missing(conn, ro_conn, pack, clock):
     rig = meeting_rig(conn, ro_conn, pack, clock)
+    conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps(
+        {"signer_name": "Priya Nair", "signer_role": "Head of Finance"}),))        # the lead record's signer
     rig.world.transcripts.add(call(lines=[("Sam Lee", "Our budget is about two hundred thousand dollars.")]))
     rig.orch.poll_calls()
     assert stage(conn) == "meeting"
@@ -394,3 +396,82 @@ def test_a_call_handled_for_a_closed_deal_can_be_moved_to_a_live_one_once_and_au
     assert len(audit(conn, "call.reassigned", live)) == 1
     with pytest.raises(LookupError):
         rig.orch.reassign_call("never-handled", live, "owner")
+
+
+# --- who signs ----------------------------------------------------------------------------------------------------------
+
+NAMED = [("Sam Lee", "Priya Nair, our Head of Finance, will sign the agreement.")]
+PRONOUN = [("Sam Lee", "He signs anything over thirty thousand dollars a month and will sign this.")]
+
+
+def only(*extra):
+    return [line for line in HOT_CALL if "will sign" not in line[1]] + list(extra)
+
+
+def signer_fields(conn):
+    return {k: v for k, v in fields(conn).items() if k.startswith("signer")}
+
+
+def test_a_signer_named_on_the_call_is_used_and_marked_as_from_the_call(conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock)
+    conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps({"signer_name": "Old Record"}),))
+    rig.world.transcripts.add(call(lines=only(*NAMED)))
+    rig.orch.poll_calls()
+    got = signer_fields(conn)
+    assert (got["signer_name"], got["signer_role"], got["signer_name_source"]) == (
+        "Priya Nair", "Head of Finance", "call")
+
+
+def test_a_call_that_names_no_signer_uses_the_name_on_the_lead_record(conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock)
+    conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps(
+        {"signer_name": "Marcus Reyes", "signer_role": "VP of Marketing"}),))
+    rig.world.transcripts.add(call(lines=only(*PRONOUN)))
+    rig.orch.poll_calls()
+    got = signer_fields(conn)
+    assert (got["signer_name"], got["signer_role"], got["signer_name_source"]) == (
+        "Marcus Reyes", "VP of Marketing", "lead_record")
+    assert stage(conn) in ("qualified", "proposal", "io_approval", "out_for_signature")
+
+
+def test_with_no_name_on_the_call_or_the_record_a_person_is_asked_and_the_deal_does_not_advance(
+        conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock)
+    rig.world.transcripts.add(call(lines=only(*PRONOUN)))
+    rig.orch.poll_calls()
+    assert "signer_name" not in fields(conn) and stage(conn) == "meeting"
+    (row,) = audit(conn, "pipeline.needs_human", rig.deal_id)
+    assert "who signs" in row["reason"] and audit(conn, "call.qualification", rig.deal_id) == []
+    assert fields(conn)["budget"]                                  # the other call fields were still kept
+
+
+def test_an_email_address_from_the_call_is_never_the_signer_address_or_name(conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock)
+    conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps(
+        {"signer_name": "Marcus Reyes", "signer_role": "VP of Marketing", "signer_email": CONTACT}),))
+    line = ("Sam Lee", "Priya Nair, our Head of Finance, will sign: her email is priya@elsewhere.example.")
+    rig.world.transcripts.add(call(lines=only(line)))
+    rig.orch.poll_calls()
+    got = signer_fields(conn)
+    assert got["signer_email"] == CONTACT and "@" not in got["signer_name"] + got["signer_role"]
+    assert not any("elsewhere" in str(v) for k, v in got.items() if k != "signer")      # only the quoted words
+
+
+def test_an_enrichment_that_tries_to_set_the_signer_address_is_rejected(conn, ro_conn, pack, clock):
+    import pytest as _pytest
+
+    from revos.domain.errors import ProposalRejected
+    rig = meeting_rig(conn, ro_conn, pack, clock)
+    deal = rig.orch._deal(rig.deal_id)
+    with _pytest.raises(ProposalRejected, match="signer_email"):
+        rig.orch._effect("enrich", deal, rig.orch._pack(deal), {"properties": {
+            "signer_email": "priya@elsewhere.example"}}, None)
+
+
+def test_resolve_signer_never_returns_a_name_that_is_an_address():
+    from revos.skills.people import resolve_signer
+    assert resolve_signer("Priya Nair, our Head of Finance, will sign", None, None).source == "call"
+    assert resolve_signer("he signs", "priya@elsewhere.example", "CFO") is None
+    assert resolve_signer("he signs", "", "") is None and resolve_signer(None, None, None) is None
+    got = resolve_signer("Priya Nair, our Head of Finance priya@elsewhere.example, will sign", "Marcus Reyes", "VP")
+    assert got is not None and got.name == "Marcus Reyes" and got.source == "lead_record"

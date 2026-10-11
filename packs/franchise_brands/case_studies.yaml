@@ -1,70 +1,51 @@
-# Public customer testimonials on cool.co, as summarised in PROJECT_BRIEF.md section 7. They are
-# testimonials, not verified results. Nothing here goes beyond what that section states.
-# source_url is the site page the brief lists as its source. source_verified stays false until
-# someone matches each testimonial to its exact page; do not present it as checked before then.
+# Case studies COOL publishes on cool.co. The figures are vendor-reported (COOL's own claims about its customers),
+# not independently verified: each is labelled that way wherever it is used. Only the figures listed here may be
+# quoted; any other figure in a draft is rejected by the claim checker. source_verified means the page was matched
+# to the figures below. No study carries a duration claim.
 case_studies:
   - id: global_beauty_brand
     customer: Global Beauty Brand
     summary: "Performance results quoted as dollar figures only."
-    tags: [performance, brands, roas, cpa]
+    tags: [price, cpm, performance]
     metrics:
       - {label: ROAS, value: "$15.52 vs $3.80"}
       - {label: CPA, value: "$19.23 vs $87.64"}
-    quote_dollar_figures_only: true   # the page's percentages do not match its dollar figures
-    use_for: [price_objection, roi_proof]      # where we choose to use it; not a claim about the customer
-    source_url: "https://cool.co/"
-    source_verified: false
-    label: public testimonial
-  - id: celebree
-    customer: Celebree
-    summary: "More branded search."
-    tags: [performance, brands]
-    use_for: [roi_proof]
+    quote_dollar_figures_only: true   # the page also shows 339% and 79%; those are never used
+    use_for: [price_objection]
+    source_url: "https://cool.co/cool-ai/"
+    source_verified: true
+    label: vendor-reported
+  - id: ethos_veterinary_health
+    customer: Ethos Veterinary Health
+    summary: "Local campaigns across a veterinary network."
+    tags: [franchise, multi_location, trust]
     metrics:
-      - {label: Branded search, value: "17.5% more"}
-    source_url: "https://cool.co/"
-    source_verified: false
-    label: public testimonial
-  - id: nhn
-    customer: NHN
-    summary: "Uptick compared with Google Ads."
-    tags: [performance, brands]
-    use_for: [roi_proof]
-    metrics:
-      - {label: Versus Google Ads, value: "50% uptick"}
-    source_url: "https://cool.co/"
-    source_verified: false
-    label: public testimonial
-  - id: pearle_vision
+      - {label: Phone leads, value: "+267%"}
+      - {label: Booked appointments, value: "+289%"}
+      - {label: Geographic reach, value: "2.6x"}
+      - {label: CPA, value: "26% lower"}
+      - {label: Locations, value: "140+"}
     use_for: [first_touch]
+    source_url: "https://cool.co/wp-content/uploads/2026/06/NVA_Ethos_Veterinary_COOL_AI-case-study-insights.pdf"
+    source_verified: true
+    label: vendor-reported
+  - id: luxury_retail_brand
+    customer: Luxury Retail Brand
+    summary: "Incremental revenue and net-new demand."
+    tags: [trust, incrementality]
+    metrics:
+      - {label: Daily revenue, value: "+29%"}
+      - {label: Daily orders, value: "+24%"}
+      - {label: Conversions from net-new demand, value: "39%"}
+    use_for: [first_touch]
+    source_url: "https://cool.co/blog/case-study/luxury-retail-brand/"
+    source_verified: true
+    label: vendor-reported
+  - id: pearle_vision
     customer: Pearle Vision
     summary: "Franchisee campaigns."
-    tags: [franchise, multi-location]
-    source_url: "https://cool.co/"
-    source_verified: false
-    label: public testimonial
-  - id: campanile
+    tags: [franchise, general]
     use_for: [first_touch]
-    customer: Campanile
-    summary: "Localised hotel events."
-    tags: [multi-location, hospitality]
     source_url: "https://cool.co/"
-    source_verified: false
-    label: public testimonial
-  - id: renault
-    use_for: [first_touch]
-    customer: Renault
-    summary: "Dealership ads."
-    tags: [franchise, multi-location, automotive]
-    source_url: "https://cool.co/"
-    source_verified: false
-    label: public testimonial
-  - id: air_france
-    customer: Air France
-    summary: "Campaigns across many markets and languages."
-    tags: [multi-location, brands]
-    metrics:
-      - {label: Reach, value: "100+ markets in 25 languages"}
-    source_url: "https://cool.co/"
-    source_verified: false
+    source_verified: true
     label: public testimonial

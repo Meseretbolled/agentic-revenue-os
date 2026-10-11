@@ -48,7 +48,7 @@ def draft_and_check(env: AgentEnv, template_name: str, *, use_case_study: bool =
     deal = tools.call("crm.get_deal", {"deal_id": str(env.deal_id)})
     contact = tools.call("crm.get_contact", {"contact_id": str(env.contact_id)})
     company = tools.call("crm.get_company", {"company_id": str(env.company_id)})
-    tags = match_tags(deal["fields"])
+    tags = [*match_tags(deal["fields"]), "general"]
 
     picked = (tools.call("casestudies.pick", {"tags": tags, "query": " ".join(tags),
                                               "situation": template_name})["case_study"]

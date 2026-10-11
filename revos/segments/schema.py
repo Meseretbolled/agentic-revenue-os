@@ -349,7 +349,7 @@ class CaseStudy(Strict):
     metrics: list[Metric] = []
     source_url: str = Field(pattern=r"^https?://\S+$")
     source_verified: bool                      # False: page listed in the brief, not yet matched
-    label: Literal["public testimonial"]
+    label: Literal["public testimonial", "vendor-reported"]     # how every use of it is marked
     quote_dollar_figures_only: bool = False
     use_for: list[str] = []                    # situations to use it in (routing, not a claim)
 

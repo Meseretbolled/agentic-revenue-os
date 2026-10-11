@@ -26,7 +26,7 @@ def test_default_fake_draft_passes_end_to_end(pack) -> None:
     assert llm.calls == ["draft_email", "verify_claims"]
     assert "I noticed that Acme Optical operates 120 locations" in out.draft.body
     assert "Unsubscribe: reply STOP" in out.draft.body and "1 Example Street" in out.draft.body
-    assert "$15.52 vs $3.80" in out.draft.body and "public testimonial" in out.draft.body
+    assert "$15.52 vs $3.80" in out.draft.body and "vendor-reported" in out.draft.body
 
 
 def test_the_model_writes_only_the_line_the_rest_is_the_approved_template(pack) -> None:
@@ -118,7 +118,7 @@ def test_stale_evidence_cannot_be_presented_as_new(pack) -> None:
     assert out.status == "needs_human" and {i.code for i in out.issues} == {"stale_as_recent"}
 
 
-@pytest.mark.parametrize("study", ["global_beauty_brand", "celebree", "air_france", None])
+@pytest.mark.parametrize("study", ["global_beauty_brand", "ethos_veterinary_health", "luxury_retail_brand", "pearle_vision", None])
 def test_every_library_case_study_renders_and_passes(pack, study) -> None:
     request, approved, names = first_touch_setup(pack, case_study_id=study)
     llm = FakeLLM()

@@ -9,6 +9,7 @@ from revos.domain.drafting import Draft, Issue
 from revos.domain.errors import LLMError
 from revos.domain.injection import scan
 from revos.ports.llm import LLM, DraftProposal, DraftRequest
+from revos.skills.asks import ask_problems
 from revos.skills.claims import ClaimVerifier, check_draft
 
 MAX_REGENERATIONS = 2
@@ -41,7 +42,8 @@ FOOTER_KEYS = ("unsubscribe_line", "postal_address")
 def model_text_issues(draft: Draft, request: DraftRequest, written: str) -> list[Issue]:
     """Checks that only depend on what the model wrote, before any claim is looked at:
     * the written text must not try to instruct anyone (the injection scanner),
-    * the finished email must still carry the unsubscribe line and the postal address."""
+    * the finished email must still carry the unsubscribe line and the postal address,
+    * the finished email asks exactly one thing, and never the same thing twice."""
     issues: list[Issue] = []
     if found := scan(written):
         issues.append(Issue("injection_in_draft", "the written text contains instruction-like wording ("
@@ -51,6 +53,9 @@ def model_text_issues(draft: Draft, request: DraftRequest, written: str) -> list
         value = str(request.context.get(key) or "").strip()
         if value and value not in draft.body:
             issues.append(Issue("footer_missing", f"the email lost its {key.replace('_', ' ')}", None))
+    footer = tuple(str(request.context.get(k) or "").strip() for k in FOOTER_KEYS)
+    for code, message in ask_problems(draft.body, footer=footer):         # exactly one ask, never repeated
+        issues.append(Issue(code, message, written))
     return issues
 
 

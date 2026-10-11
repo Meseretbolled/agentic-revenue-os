@@ -6,6 +6,8 @@ text, and a failed check puts the pack's own wording in its place and writes an 
 import json
 from datetime import UTC, datetime
 
+import pytest
+
 from revos.adapters.claude_llm import CallResult, ClaudeConfig, ClaudeLLM
 from revos.adapters.fake_llm import FakeLLM
 from revos.adapters.llm_tasks import draft_prompt
@@ -127,18 +129,18 @@ def test_a_claim_the_verifier_rejects_is_blocked(conn, ro_conn, pack, clock):
 
 
 def test_the_email_must_still_carry_the_unsubscribe_line_and_the_postal_address() -> None:
-    request = DraftRequest("s", "Hi {{ first_name }},\n\n{{ personalised_line }}\n\nJo",
+    request = DraftRequest("s", "Hi {{ first_name }},\n\n{{ personalised_line }}\n\nWould a short call be useful?\n\nJo",
                            {"first_name": "Sam", "unsubscribe_line": "Reply STOP.",
                             "postal_address": "1 Real Road"}, Evidence())
-    draft = Draft("s", "Hi Sam,\n\nHello there.\n\nJo", ())
+    draft = Draft("s", "Hi Sam,\n\nHello there.\n\nWould a short call be useful?\n\nJo", ())
     codes = {i.code for i in model_text_issues(draft, request, "Hello there.")}
     assert codes == {"footer_missing"}
-    ok = Draft("s", "Hi Sam,\n\nHello.\n\nReply STOP.\n1 Real Road", ())
+    ok = Draft("s", "Hi Sam,\n\nHello.\n\nWould a short call be useful?\n\nReply STOP.\n1 Real Road", ())
     assert model_text_issues(ok, request, "Hello.") == []
 
 
 def test_a_template_that_itself_fails_the_checks_goes_to_a_person_not_out_the_door() -> None:
-    request = DraftRequest("s", "Hi {{ first_name }},\n\n{{ personalised_line }}",    # no footer in the template
+    request = DraftRequest("s", "Hi {{ first_name }},\n\n{{ personalised_line }}\n\nWould a short call be useful?",   # no footer
                            {"first_name": "Sam", "unsubscribe_line": "Reply STOP.", "postal_address": "1 Road"},
                            Evidence())
     bad = DraftProposal("Plain words.", ())
@@ -147,7 +149,7 @@ def test_a_template_that_itself_fails_the_checks_goes_to_a_person_not_out_the_do
 
 
 def test_an_unavailable_verifier_is_not_papered_over_with_the_template() -> None:
-    request = DraftRequest("Hello", "{{ personalised_line }}\nReply STOP.\n1 Road",
+    request = DraftRequest("Hello", "{{ personalised_line }}\nWould a short call be useful?\nReply STOP.\n1 Road",
                            {"unsubscribe_line": "Reply STOP.", "postal_address": "1 Road"},
                            Evidence.of([EvidenceItem("F1", FACT)]))
     line = DraftProposal(FACT, (Claim(FACT, ("F1",)),))
@@ -287,9 +289,84 @@ def test_drafts_that_pass_are_still_verified_by_a_model_before_use(conn, ro_conn
 
 
 def test_the_plain_helpers_agree(pack):
-    request = DraftRequest("Hello", "{{ personalised_line }}\nReply STOP.\n1 Road",
+    request = DraftRequest("Hello", "{{ personalised_line }}\nWould a short call be useful?\nReply STOP.\n1 Road",
                            {"unsubscribe_line": "Reply STOP.", "postal_address": "1 Road"},
                            Evidence.of([EvidenceItem("F1", FACT)]))
     ok = draft_with_checks(FakeLLM(script=[DraftProposal("Hello there.", ())]), request,
                            ["Reply STOP. 1 Road"], [], None)
     assert ok.status == "passed" and ok.fallback == (), ok.issues
+
+
+# --- exactly one question or call to action, never repeated -----------------------------------------------------
+
+def asked(proposal_line: str):
+    return DraftProposal(proposal_line, ())
+
+
+def test_every_pack_template_that_the_model_fills_asks_exactly_one_thing_by_itself(pack):
+    import jinja2
+
+    from revos.skills.asks import asks_in
+    env = jinja2.Environment(undefined=jinja2.Undefined)
+    ctx = {"first_name": "Maya", "company": "Acme", "personalised_line": "Acme runs 85 sites.",
+           "pillar": pack.messaging.pillars[0], "case_study": None, "sender_name": "Jo",
+           "unsubscribe_line": "U", "postal_address": "P", "slots_intro": "Here are a few times that work:",
+           "slots_text": "- Thursday 09:00"}
+    for name in ("first_touch", "follow_up", "meeting_offer"):
+        body = env.from_string(pack.messaging.templates[name].body).render(ctx)
+        assert len(asks_in(body, footer=("U", "P"))) == 1, name
+
+
+@pytest.mark.parametrize("line,code", [
+    ("Acme runs 85 sites. Would you be open to a chat?", "ask_count"),            # a second ask
+    ("Acme runs 85 sites. Let me know what you think.", "ask_count"),               # a request, not a question
+    ("Acme runs 85 sites. Would a short call be useful?", "repeated_question"),    # the template's own question
+    ("Acme runs 85 sites. Could we talk? Could we talk?", "repeated_question"),
+])
+def test_a_second_or_repeated_ask_is_found(pack, line, code):
+    from revos.skills.drafting import render_email
+    template = pack.messaging.templates["first_touch"]
+    request = DraftRequest(template.subject, template.body, {
+        "first_name": "Maya", "company": "Acme", "pillar": pack.messaging.pillars[0], "case_study": None,
+        "sender_name": "Jo", "unsubscribe_line": "U", "postal_address": "P"}, Evidence())
+    draft = render_email(request, asked(line))
+    assert code in {i.code for i in model_text_issues(draft, request, line)}
+
+
+def test_a_draft_with_the_templates_one_ask_and_statements_passes_the_ask_check(pack):
+    from revos.skills.drafting import render_email
+    template = pack.messaging.templates["first_touch"]
+    request = DraftRequest(template.subject, template.body, {
+        "first_name": "Maya", "company": "Acme", "pillar": pack.messaging.pillars[0], "case_study": None,
+        "sender_name": "Jo", "unsubscribe_line": "U", "postal_address": "P"}, Evidence())
+    draft = render_email(request, asked("Acme runs 85 sites, which makes consistency hard."))
+    assert [i for i in model_text_issues(draft, request, "x") if i.code in ("ask_count", "repeated_question")] == []
+
+
+def test_a_draft_that_asks_twice_is_regenerated_with_the_reason_then_passes(conn, ro_conn, pack, clock):
+    two = DraftProposal("Quick thought. Would you be open to a chat?", ())
+    llm = Recording(script=[two, DraftProposal("Local campaigns need consistency across sites.", ())])
+    rig, _, payload = first_touch(conn, ro_conn, pack, clock, llm)
+    assert payload["draft_source"] != "template" and "open to a chat" not in payload["body"]
+    assert any("exactly one question" in f for f in llm.requests[1].feedback)       # the model was told why
+    assert audit(conn, "draft.fell_back_to_template") == []
+
+
+def test_a_draft_that_keeps_asking_twice_falls_back_to_the_template_with_the_audit_row(conn, ro_conn, pack, clock):
+    two = DraftProposal("Quick thought. Would you be open to a chat?", ())
+    rig, _, payload = first_touch(conn, ro_conn, pack, clock, FakeLLM(script=[two, two, two]))
+    assert payload["draft_source"] == "template" and "open to a chat" not in payload["body"]
+    assert payload["body"].count("?") == 1
+    assert "ask_count" in audit(conn, "draft.fell_back_to_template")[0]["checks_failed"]
+
+
+def test_the_model_is_told_to_write_statements_only():
+    assert "no question mark" in draft_prompt(DraftRequest("s", "b", {"first_name": "A", "company": "B"}, Evidence()))
+
+
+def test_an_email_with_no_ask_at_all_also_fails():
+    request = DraftRequest("s", "Hi {{ first_name }},\n\n{{ personalised_line }}\n\nJo",
+                           {"first_name": "Sam", "unsubscribe_line": "", "postal_address": ""}, Evidence())
+    draft = Draft("s", "Hi Sam,\n\nStatements only.\n\nJo", ())
+    (issue,) = [i for i in model_text_issues(draft, request, "Statements only.") if i.code == "ask_count"]
+    assert "it has 0" in issue.message

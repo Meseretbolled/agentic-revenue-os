@@ -25,3 +25,27 @@ def parse_person_role(quote: str) -> Person | None:
             if role and role.lower() not in {"decision maker", "decision-maker"}:
                 return Person(match.group("name").strip(), role)
     return None
+
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+@dataclass(frozen=True)
+class Signer:
+    name: str
+    role: str
+    source: str            # "call" (the quote states the name) or "lead_record" (the call gave none)
+
+
+def resolve_signer(call_quote: str | None, record_name: str | None,
+                   record_role: str | None) -> Signer | None:
+    """Who signs. The call's own words win when its quote names a person and a role; otherwise the lead
+    record's signer. A name or role that contains an email address is never accepted: an address is not a
+    name, and the signer's address comes from the lead record alone. None when neither has a name."""
+    person = parse_person_role(call_quote) if call_quote else None
+    if person and not _EMAIL.search(f"{person.name} {person.role}"):
+        return Signer(person.name, person.role, "call")
+    name = (record_name or "").strip()
+    if name and not _EMAIL.search(name):
+        return Signer(name, (record_role or "").strip(), "lead_record")
+    return None

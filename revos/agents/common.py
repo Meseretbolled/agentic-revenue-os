@@ -46,6 +46,13 @@ def match_tags(fields: Mapping[str, Any]) -> list[str]:
     plain = clean_fields(fields)
     tags = [str(plain["industry"])] if plain.get("industry") else []
     tags += [name.removeprefix("is_") for name, v in plain.items() if v is True]
+    count = plain.get("location_count")
+    if isinstance(count, int | float) and not isinstance(count, bool) and count >= 2 \
+            and "multi_location" not in tags:
+        tags.append("multi_location")
+    said = " ".join(str(plain.get(k, "")) for k in ("needs", "objections", "competitors")).casefold()
+    if any(w in said for w in ("incremental", "attribution", "net-new", "which campaigns")):
+        tags += [t for t in ("trust", "incrementality") if t not in tags]
     return tags
 
 

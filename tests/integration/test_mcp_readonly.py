@@ -78,7 +78,7 @@ def test_running_every_tool_changes_nothing_in_the_database(conn, ro_conn, pack)
     ctx, _ = make_ctx(ro_conn, pack, deal["deal"])
     args = {"deal_id": str(deal["deal"]), "contact_id": str(deal["contact"]),
             "company_id": str(deal["company"]), "lesson_id": lesson, "query": "brightside",
-            "case_study_id": "celebree", "url": "https://brightside-optical.example/", "tags": []}
+            "case_study_id": "pearle_vision", "url": "https://brightside-optical.example/", "tags": []}
     before = snapshot(conn)
     ran = 0
     for key, spec in REGISTRY.items():

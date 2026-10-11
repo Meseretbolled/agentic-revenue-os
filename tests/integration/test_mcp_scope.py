@@ -136,8 +136,8 @@ def test_case_studies_come_from_the_runs_segment_library(world) -> None:
     _a, _b, ctx, _ = world
     listed = data(call(ctx, "outreach", "casestudies.list"))["case_studies"]
     assert {c["id"] for c in listed} >= {"global_beauty_brand", "pearle_vision"}
-    assert all(c["label"] == "public testimonial" and c["source_url"] for c in listed)
-    picked = data(call(ctx, "reply", "casestudies.pick", tags=["roas"], query="performance"))
+    assert all(c["label"] in ("vendor-reported", "public testimonial") and c["source_url"] for c in listed)
+    picked = data(call(ctx, "reply", "casestudies.pick", tags=["performance"], query="performance"))
     assert picked["case_study"]["id"] == "global_beauty_brand"
     assert picked["case_study"]["figures"] == "ROAS: $15.52 vs $3.80; CPA: $19.23 vs $87.64"
     assert data(call(ctx, "reply", "casestudies.pick", tags=["zzz"]))["case_study"] is None
