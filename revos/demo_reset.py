@@ -6,6 +6,9 @@ what already happened stays on record). After it, a restarted `revos run` cannot
 import psycopg
 from psycopg.types.json import Jsonb
 
+from revos.domain.stages import DealStage
+from revos.orchestrator.transitions import transition_deal
+
 QUEUED_TYPES = ("lead.created", "action.send", "action.veto_expired", "lead.snooze_ended",
                 "signature.event")
 
@@ -22,4 +25,11 @@ def cancel_pending_work(conn: psycopg.Connection) -> dict[str, int]:
         for deal_id, kind in actions:
             conn.execute("INSERT INTO audit_log (actor, event, deal_id, detail) VALUES "
                          "('operator', 'demo.reset', %s, %s)", (deal_id, Jsonb({"cancelled_action": kind})))
-    return {"actions": len(actions), "jobs": len(jobs)}
+        # Close every deal that is still open, through the state machine, so an old demo deal can never
+        # again be a candidate for a reply or a call (matching only considers live deals).
+        open_deals = conn.execute(
+            "SELECT id FROM deals WHERE stage NOT IN "
+            "('closed_won', 'closed_lost', 'do_not_contact', 'handoff')").fetchall()
+        for (deal_id,) in open_deals:
+            transition_deal(conn, deal_id, DealStage.CLOSED_LOST, actor="operator", reason="reset-demo")
+    return {"actions": len(actions), "jobs": len(jobs), "deals": len(open_deals)}

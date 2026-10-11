@@ -189,7 +189,7 @@ def reset_demo_command(
         else:
             counts = cancel_pending_work(conn)
             typer.echo(f"local: cancelled {counts['actions']} unsent action(s) and "
-                       f"{counts['jobs']} queued job(s)")
+                       f"{counts['jobs']} queued job(s); closed {counts['deals']} open deal(s)")
     if not hubspot:
         return
     from revos.adapters.hubspot.client import HubSpotError, HubSpotUnavailable
