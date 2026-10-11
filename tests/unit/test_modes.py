@@ -11,7 +11,7 @@ from revos.adapters.hubspot.crm import HubSpotCRM
 from revos.adapters.mock.crm import MockCRM
 from revos.adapters.mock.mailer import MockMailer
 from revos.cli.main import app
-from revos.doctor import FAILED, Check
+from revos.doctor import FAILED, OK, Check
 from revos.modes import MOCK, REAL, integration_modes, mode_of
 
 KEYS = ("HUBSPOT_TOKEN", "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "ANTHROPIC_API_KEY", "SLACK_BOT_TOKEN",
@@ -39,7 +39,7 @@ def test_each_key_switches_its_own_service_to_real() -> None:
 
 def test_a_key_for_a_service_without_an_adapter_yet_is_honestly_a_mock() -> None:
     (slack,) = [m for m in integration_modes({"SLACK_BOT_TOKEN": "x"}) if m.service == "Slack"]
-    assert slack.mode == MOCK and "key found" in slack.why and "adapter arrives" in slack.why
+    assert slack.mode == MOCK and "key found" in slack.why and "adapter not built yet" in slack.why and not slack.built
 
 
 def test_the_composition_root_agrees_with_the_modes(monkeypatch) -> None:
@@ -81,7 +81,7 @@ def test_doctor_prints_what_each_service_will_run_as(monkeypatch) -> None:
     result = CliRunner().invoke(app, ["doctor"])
     lines = {line.split()[0]: line for line in result.output.splitlines()}
     assert "will run as: REAL" in lines["HubSpot"] and "REAL FAILED" in lines["HubSpot"]
-    assert "will run as: MOCK" in lines["Slack"] and result.exit_code == 1
+    assert lines["Slack"].startswith("Slack") and result.exit_code == 1
 
 
 def test_run_refuses_to_start_when_a_real_service_fails_and_never_swaps_in_a_mock(monkeypatch, tmp_path) -> None:
@@ -124,3 +124,38 @@ def test_a_failing_check_for_a_service_that_runs_as_a_mock_does_not_block_start_
     assert result.exit_code == 0, result.output
     assert "HubSpot      MOCK" in result.output or "HubSpot       MOCK" in result.output
     assert "Tavily" in result.output and "stopped cleanly" in result.output
+
+
+def test_a_working_key_for_a_service_without_an_adapter_says_so_plainly(monkeypatch) -> None:
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "x")
+    monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Slack", OK), Check("Tavily", FAILED, "key rejected")])
+    out = CliRunner().invoke(app, ["doctor"]).output
+    assert "Slack         key OK, adapter not built yet: runs as MOCK" in out
+    assert "REAL OK" not in out and "will run as: MOCK" not in out
+    monkeypatch.setenv("TAVILY_API_KEY", "t")
+    out = CliRunner().invoke(app, ["doctor"]).output
+    assert "Tavily        key NOT working (key rejected), adapter not built yet: runs as MOCK" in out
+
+
+def test_the_banner_uses_the_same_wording(monkeypatch, tmp_path, test_db_url) -> None:
+    monkeypatch.setenv("DATABASE_URL", test_db_url)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "x")
+    monkeypatch.setenv("REVOS_LOG_FILE", str(tmp_path / "l.jsonl"))
+    monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Slack", OK)])
+
+    class Stub:
+        def __init__(self, **kw):
+            import threading
+            self.stop_event, self.errors = threading.Event(), []
+
+        def start(self):
+            self.stop_event.set()
+
+        def stop(self):
+            from revos.runtime.supervisor import ShutdownReport
+            return ShutdownReport()
+
+    import revos.runtime.supervisor as sup
+    monkeypatch.setattr(sup, "Supervisor", Stub)
+    out = CliRunner().invoke(app, ["run", "--no-api"]).output
+    assert "Slack         key OK, adapter not built yet: runs as MOCK" in out

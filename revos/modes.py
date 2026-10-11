@@ -18,9 +18,21 @@ class Mode:
     service: str            # the same names `revos doctor` prints
     mode: str               # REAL or MOCK
     why: str = ""
+    built: bool = True      # False: the app has no adapter for this service yet, whatever the key says
 
     def line(self) -> str:
         return f"{self.service:<14}{self.mode}" + (f"  ({self.why})" if self.why else "")
+
+    def line_with(self, status: str | None, detail: str = "") -> str:
+        """The line for the banner and `revos doctor`, given the service's check result (its status
+        text, e.g. 'REAL OK', and detail), if one was run."""
+        if not self.built and status is not None:
+            if status == "REAL OK":
+                return f"{self.service:<14}key OK, adapter not built yet: runs as MOCK"
+            if status.startswith("REAL FAILED"):
+                return (f"{self.service:<14}key NOT working ({detail or 'failed'}), adapter not built yet: "
+                        "runs as MOCK")
+        return self.line()
 
 
 def _has(env: Mapping[str, str], *names: str) -> bool:
@@ -44,8 +56,8 @@ def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
     env = os.environ if env is None else env
 
     def not_built(name: str, key: str, step: str) -> Mode:
-        return Mode(name, MOCK, f"key found, but the {name} adapter arrives in {step}" if _has(env, key)
-                    else "no key")
+        return Mode(name, MOCK, f"key found, adapter not built yet (arrives in {step})" if _has(env, key)
+                    else "no key", built=False)
 
     llm_why = ("" if llm_live(env) else "LLM_MODE is fake" if env.get("LLM_MODE", "fake") != "live"
                else "LLM_MODE=live but ANTHROPIC_API_KEY is missing: the app refuses to start")

@@ -1,0 +1,56 @@
+# Fictional seed leads for `revos seed <tag> --profile hot|warm|cold`, keyed by segment pack id.
+#
+# HONESTY NOTE: every company, person and number here is invented for the demo. The fields are
+# SYNTHETIC CRM SIGNALS (website visits, a pricing-page view, a demo request) standing in for what a
+# real portal would hold. They are never presented as COOL's data. Engagement signals that need a
+# real event (a reply, a booked meeting) are deliberately NOT faked: the only engagement signal a
+# lead can honestly carry before any outreach is a case-study click.
+#
+# Expected tiers come from the pack's own weights (fit 0.5, intent 0.3, engagement 0.2; A >= 65,
+# B >= 40, C >= 20); tests/unit/test_seed_profiles.py enforces them.
+franchise_brands:
+  hot:
+    company: Harborview Optical Collective
+    domain: harborview-optical.example
+    contact: Maya Ortiz
+    expect_tier: A
+    fields:
+      location_count: 85
+      is_franchise: true
+      industry: optical
+      region: US
+      annual_ad_spend_usd: 400000
+      contact_seniority: vp
+      requested_demo: true
+      visited_pricing_page: true
+      website_visits_30d: 6
+      hiring_marketing_roles: true
+      local_marketing_pain_mentioned: true
+      clicked_case_study: true
+  warm:
+    company: Millbrook Inns
+    domain: millbrook-inns.example
+    contact: Lee Chen
+    expect_tier: B
+    fields:
+      location_count: 22
+      is_franchise: true
+      industry: hospitality
+      region: CA
+      annual_ad_spend_usd: 300000
+      contact_seniority: manager
+      visited_pricing_page: true
+      website_visits_30d: 4
+  cold:
+    company: Ridgeline Auto Parts
+    domain: ridgeline-parts.example
+    contact: Pat Kim
+    expect_tier: C
+    fields:
+      location_count: 12
+      is_franchise: false
+      industry: automotive
+      region: MX
+      contact_seniority: other
+      hiring_marketing_roles: true
+      website_visits_30d: 3

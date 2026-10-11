@@ -128,9 +128,10 @@ class Orchestrator:
                  handoff_channel: str = "#revops",
                  customer_success_owner: str = "customer-success", inbox: Inbox | None = None,
                  crm_sync: bool = False, daily_cap: int | None = None,
-                 plus_bases: frozenset[str] = frozenset()) -> None:
+                 plus_bases: frozenset[str] = frozenset(),
+                 send_window_bypass: bool = False) -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
-        self.plus_bases = plus_bases
+        self.plus_bases, self.send_window_bypass = plus_bases, send_window_bypass
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
         self.demo_mode, self.allowed_recipients, self.calendar = demo_mode, allowed_recipients, calendar
@@ -167,7 +168,8 @@ class Orchestrator:
     def policy_config(self, pack: Pack) -> PolicyConfig:
         config = PolicyConfig.from_pack(pack, demo_mode=self.demo_mode,
                                         allowed_recipients=self.allowed_recipients,
-                                        plus_bases=self.plus_bases)
+                                        plus_bases=self.plus_bases,
+                                        send_window_bypass=self.send_window_bypass)
         if self.daily_cap is not None:                 # a real mailbox gets a lower cap than the pack's
             config = replace(config, daily_cap=min(config.daily_cap, self.daily_cap))
         return config

@@ -69,8 +69,8 @@ Several of our stages share one HubSpot stage, so the exact one is also stored i
 
 ## Gmail (SMTP send, IMAP read)
 
-**Status: send, `find_sent` and reply fetching have run against real Gmail (owner's run, then a
-header check). Everything else below is tested against a fake SMTP/IMAP server.**
+**Status: send, `find_sent`, reply fetching and header matching have run against real Gmail (owner's
+runs). Everything not listed under "What real Gmail did" is tested against a fake SMTP/IMAP server.**
 
 What real Gmail did:
 
@@ -78,14 +78,17 @@ What real Gmail did:
 * `scripts/gmail_header_check.py --no-wait`: **Gmail kept our Message-ID** on the Sent copy, and kept
   our `Reply-To` plus address (`name+d1a2b3c4@gmail.com`). So Gmail does not rewrite the id; the
   real-id read-back is a safeguard that stays a no-op here.
-* In the first `gmail_reply_check.py` run the reply (Message-ID `<autogen-java-...@google.com>`, so
-  sent from a Gmail mobile app) was matched **by sender address only**, not by thread. The sent
-  id was intact, so either that client did not set In-Reply-To/References or the message fetched was
-  older mail from the same address. Two changes follow from that: the inbox now never searches for
-  or accepts mail dated before our first sent email (`not_before`), and replies are matched by the
-  plus tag as well. `scripts/gmail_header_check.py` (with a hand reply) prints the headers of the
-  Sent copy and of the reply so the actual cause is on record; see "Reply headers seen" below once
-  it has been run.
+* **`scripts/gmail_header_check.py` passed for real** (owner's run, reply by hand from the Gmail
+  web page):
+  * our Message-ID was kept by Gmail on the Sent copy;
+  * the desktop-web reply carried `In-Reply-To` and `References` with our id, and went to the
+    `Reply-To` plus-tag address (`name+<deal tag>@gmail.com`);
+  * both the thread-header match and the plus-tag match returned True.
+* An **earlier reply from a different client** (Message-ID `<autogen-java-...@google.com>`, a Gmail
+  mobile app) had **no thread headers**, and the first `gmail_reply_check.py` run matched it only by
+  sender address. That is why the fallbacks exist: the Reply-To plus tag, the stored real Message-ID,
+  and the "exactly one open deal" sender rule (anything ambiguous is held, never guessed). The inbox
+  also never accepts mail dated before our first sent email.
 
 ### How a reply is matched to a deal
 
@@ -152,8 +155,8 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
   key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
   fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
 * **Not built yet, so MOCK even with a key**: Slack (Step 10), Fireflies (Step 11), Dropbox Sign
-  (Step 12), Tavily. Their doctor line can say `REAL OK` while the app runs them as MOCK; the banner
-  says which.
+  (Step 12), Tavily. For these, `revos doctor` and the banner say `key OK, adapter not built yet:
+  runs as MOCK` (or `key NOT working (...)`) instead of `REAL OK`.
 * **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
   distinct HubSpot contact (HubSpot merges by email and refuses `.test` and `.example`), and every
   email lands in the one inbox. The demo-mode recipient rule accepts an address only if its domain
@@ -165,7 +168,7 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
   lead when the mail client keeps them; the `Reply-To` plus tag (`sender+<deal id prefix>@`) identifies
   it when it does not; the sender rule compares base addresses and accepts only one open deal.
   Covered offline by `tests/integration/test_plus_addresses.py`; which of the two a real client
-  provides is what `scripts/gmail_header_check.py` records.
+  provides was recorded by `scripts/gmail_header_check.py` (see above): the web client provides both.
 * **Correlation id**: one id is created with each event and follows it through the job, the agent
   runs, the policy decision, the outbox action, the audit rows and every log line.
   `revos trace <deal id>` (or `--lead <email>`, `--json`) merges events, agent runs and proposals, policy
@@ -184,6 +187,21 @@ one correlation id (`revos trace` shows the whole timeline). The first email was
 window**, not sent: the pack only allows weekdays 09:00-17:00 in the recipient's timezone, and the run
 was on a Sunday. It is queued as a timer for Monday 09:00 UTC and `revos run` sends it then. Nothing was
 changed to get around the window. The first real email from `revos run` has therefore not been seen yet.
+
+### Send window: `SEND_WINDOW_MODE`
+
+The pack's window (weekdays 09:00-17:00 in the recipient's timezone) is the default (`enforce`).
+`SEND_WINDOW_MODE=demo_bypass` skips only that check, only when `REVOS_ENV=demo` (anything else is a
+startup error, in `revos run`, `revos doctor` and the composition root). While it is on, the banner and
+`revos doctor` say `SEND WINDOW BYPASSED: demo only`, and each send it lets through writes a
+`send_window.bypassed` audit row with the reason. The recipient allowlist, caps, suppression, the kill
+switch and hard blocks are untouched (there is a test for each).
+
+### Seed profiles
+
+`revos seed <tag> --profile hot|warm|cold` takes the lead's data from `revos/fixtures/seed_profiles.yaml`
+(fictional, synthetic CRM signals; no reply or meeting is faked). With the sample pack they score
+A (83/100), B (51/100) and C (23/100) from the pack's own weights, each with a per-rule written reason.
 
 ## Other services
 

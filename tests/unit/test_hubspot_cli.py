@@ -40,9 +40,18 @@ def test_a_forbidden_response_is_a_clean_message_and_exit_1(fake) -> None:
     assert result.exit_code == 1 and "403 forbidden" in result.output and TOKEN not in result.output
 
 
-def test_reset_demo_needs_the_hubspot_flag(fake) -> None:
-    result = CliRunner().invoke(cli.app, ["reset-demo"])
-    assert result.exit_code == 2 and "nothing selected" in result.output
+@pytest.fixture(autouse=True)
+def _test_database(monkeypatch, test_db_url) -> None:
+    """reset-demo also cancels local work: it must only ever see the test database."""
+    monkeypatch.setenv("DATABASE_URL", test_db_url)
+
+
+def test_reset_demo_without_the_hubspot_flag_only_touches_local_work(fake) -> None:
+    fake_hubspot, client = fake
+    HubSpotCRM(client).upsert_contact("demo@x.example", {}, "k1")
+    result = CliRunner().invoke(cli.app, ["reset-demo", "--yes"])
+    assert result.exit_code == 0 and "local: cancelled" in result.output and "deleted" not in result.output
+    assert len(fake_hubspot.objects["contacts"]) == 1                 # HubSpot was not touched
 
 
 def test_reset_demo_asks_first_and_deletes_only_flagged_records(fake) -> None:

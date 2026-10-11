@@ -4,16 +4,34 @@ refuses .test and .example domains) while every email still lands in the same in
 
 import os
 from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import psycopg
+import yaml
 from psycopg.types.json import Jsonb
 
 from revos.policy.recipients import base_of
 from revos.ports.clock import Clock
 from revos.runtime.events import record_event
 
+PROFILES_FILE = Path(__file__).resolve().parent / "fixtures" / "seed_profiles.yaml"
+PROFILE_NAMES = ("hot", "warm", "cold")
 FALLBACK_BASE = "prospect@example.com"          # used only when PROSPECT_TEST_EMAIL is not set (mock runs)
+
+
+def load_profiles(segment_id: str, path: Path = PROFILES_FILE) -> dict[str, dict[str, Any]]:
+    """The seed profiles for one segment, from the YAML fixture (the data lives there, not in code)."""
+    data = yaml.safe_load(path.read_text()) or {}
+    profiles = data.get(segment_id)
+    if not profiles:
+        raise ValueError(f"no seed profiles for segment {segment_id!r} in {path.name}")
+    for name, profile in profiles.items():
+        missing = {"company", "domain", "contact", "fields"} - set(profile)
+        if missing:
+            raise ValueError(f"seed profile {name!r} lacks {', '.join(sorted(missing))}")
+    return profiles
 
 
 def demo_address(tag: str, env: Mapping[str, str] | None = None) -> str:

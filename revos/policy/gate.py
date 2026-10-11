@@ -125,8 +125,14 @@ def send_with_gate(
         recipient_tz = zone(action["to_tz"], config.default_timezone)
         opens = next_open(now, recipient_tz, config.send_window)
         if opens > now:
-            _hold(conn, action, "send_window", run_at=opens)
-            return GateResult("deferred", "send_window", run_at=opens)
+            if config.send_window_bypass and config.demo_mode:
+                # demo only: skip this one check, and say so every time. Nothing else is relaxed.
+                write_audit(conn, "gate", "send_window.bypassed", action["deal_id"], {
+                    "action_id": str(action_id),
+                    "reason": f"demo bypass: the send window was closed until {opens.isoformat()}"})
+            else:
+                _hold(conn, action, "send_window", run_at=opens)
+                return GateResult("deferred", "send_window", run_at=opens)
 
         # 5. Caps, claimed atomically. A rolled-back savepoint returns the domain slot.
         cap_tz = zone(config.cap_timezone, "UTC")

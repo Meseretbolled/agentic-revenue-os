@@ -73,6 +73,7 @@ class PolicyConfig:
     demo_mode: bool = True                    # fail closed: empty allowlist means nobody
     allowed_recipients: frozenset[str] = frozenset()
     plus_bases: frozenset[str] = frozenset()  # inboxes whose name+tag@ variants are also allowed
+    send_window_bypass: bool = False          # SEND_WINDOW_MODE=demo_bypass; only ever true in demo mode
 
     @classmethod
     def from_pack(
@@ -82,6 +83,7 @@ class PolicyConfig:
         demo_mode: bool = True,
         allowed_recipients: frozenset[str] = frozenset(),
         plus_bases: frozenset[str] = frozenset(),
+        send_window_bypass: bool = False,
     ) -> "PolicyConfig":
         """The pack's autonomy levels, caps, send window and discount limit become the policy."""
         p = pack.policy
@@ -97,6 +99,7 @@ class PolicyConfig:
             demo_mode=demo_mode,
             allowed_recipients=allowed_recipients,
             plus_bases=plus_bases,
+            send_window_bypass=send_window_bypass and demo_mode,
         )
 
     @classmethod
@@ -106,5 +109,28 @@ class PolicyConfig:
             demo_mode=os.environ.get("REVOS_ENV", "demo") == "demo",
             allowed_recipients=frozenset(a.strip().lower() for a in addresses if a.strip()),
             plus_bases=frozenset({os.environ.get("PROSPECT_TEST_EMAIL", "").strip().lower()} - {""}),
+            send_window_bypass=send_window_bypassed(),
             veto_window_seconds=int(os.environ.get("VETO_WINDOW_SECONDS", "60")),
         )
+
+
+class ConfigError(ValueError):
+    """The configuration is unsafe or unreadable: the app refuses to start."""
+
+
+BYPASS_BANNER = "SEND WINDOW BYPASSED: demo only"
+
+
+def send_window_bypassed(env: Mapping[str, str] | None = None) -> bool:
+    """SEND_WINDOW_MODE=enforce (default) keeps the pack's send window. demo_bypass skips only that
+    one check, and only when REVOS_ENV is explicitly `demo`; anywhere else it is a startup error."""
+    env = os.environ if env is None else env
+    mode = env.get("SEND_WINDOW_MODE", "").strip().lower() or "enforce"
+    if mode == "enforce":
+        return False
+    if mode != "demo_bypass":
+        raise ConfigError(f"SEND_WINDOW_MODE must be 'enforce' or 'demo_bypass', got {mode!r}")
+    if env.get("REVOS_ENV", "").strip().lower() != "demo":
+        raise ConfigError("SEND_WINDOW_MODE=demo_bypass is only allowed when REVOS_ENV=demo; "
+                          "refusing to start")
+    return True

@@ -51,16 +51,27 @@ def demo() -> None:
 
 @app.command("doctor")
 def doctor() -> None:
-    """One status per service: REAL OK, REAL FAILED (with a reason category) or MOCK. No values."""
+    """One status per service: REAL OK, REAL FAILED (with a reason category) or MOCK, and what it
+    will run as. No values."""
     from revos.doctor import FAILED, run_checks
     from revos.env import load_env_file
-    load_env_file()
     from revos.modes import integration_modes
+    from revos.policy.config import BYPASS_BANNER, ConfigError, send_window_bypassed
+    load_env_file()
+    try:
+        bypass = send_window_bypassed()
+    except ConfigError as exc:
+        typer.echo(f"CONFIG ERROR  {exc}", err=True)
+        raise typer.Exit(1) from exc
     checks = run_checks()
+    modes = {m.service: m for m in integration_modes()}
     for check in checks:
-        mode = next(m for m in integration_modes() if m.service == check.service)
-        note = f" ({mode.why})" if mode.mode == "MOCK" and "adapter" in mode.why else ""
-        typer.echo(f"{check.line():<58} will run as: {mode.mode}{note}")
+        mode = modes[check.service]
+        if mode.built:
+            typer.echo(f"{check.line():<50} will run as: {mode.mode}")
+        else:
+            typer.echo(mode.line_with(check.status, check.detail))
+    typer.echo(f"{'Send window':<14}" + (BYPASS_BANNER if bypass else "enforced (the pack's weekday hours)"))
     if any(c.status == FAILED for c in checks):
         raise typer.Exit(1)
 
@@ -96,17 +107,33 @@ def hubspot_setup() -> None:
 
 @app.command("reset-demo")
 def reset_demo_command(
-    hubspot: bool = typer.Option(False, "--hubspot", help="delete the HubSpot demo records"),
+    hubspot: bool = typer.Option(False, "--hubspot", help="also delete the HubSpot demo records"),
     yes: bool = typer.Option(False, "--yes", help="do not ask first"),
     dry_run: bool = typer.Option(False, "--dry-run", help="only count"),
 ) -> None:
-    """Delete ONLY records flagged revos_demo=true. Local reset arrives with the dashboard step."""
+    """Cancel queued demo work locally (unsent emails, queued jobs) and, with --hubspot, delete ONLY
+    the HubSpot records flagged revos_demo=true."""
+    from revos.db import connect, migrate
+    from revos.demo_reset import cancel_pending_work
+    from revos.env import load_env_file
+    load_env_file()
+    if not dry_run and not yes and not typer.confirm("cancel all unsent actions and queued jobs?"):
+        raise typer.Exit(1)
+    with connect() as conn:
+        conn.autocommit = True
+        migrate(conn)
+        if dry_run:
+            left = conn.execute("SELECT count(*) FROM actions WHERE status IN "
+                                "('pending', 'awaiting_approval', 'approved')").fetchone()[0]
+            typer.echo(f"local: {left} unsent action(s) would be cancelled")
+        else:
+            counts = cancel_pending_work(conn)
+            typer.echo(f"local: cancelled {counts['actions']} unsent action(s) and "
+                       f"{counts['jobs']} queued job(s)")
     if not hubspot:
-        typer.echo("nothing selected: use --hubspot (the local reset comes in a later step)", err=True)
-        raise typer.Exit(2)
+        return
     from revos.adapters.hubspot.client import HubSpotError, HubSpotUnavailable
     from revos.adapters.hubspot.reset import find_demo_records, reset_demo
-    from revos.db import connect
     client = _hubspot_client()
     try:
         found = find_demo_records(client)
@@ -204,17 +231,28 @@ def run(
     from revos.env import load_env_file
     from revos.modes import REAL, integration_modes
     from revos.obs import configure_logging, log
+    from revos.policy.config import BYPASS_BANNER, ConfigError, send_window_bypassed
     from revos.runtime.supervisor import Supervisor
 
     load_env_file()
+    try:
+        bypass = send_window_bypassed()
+    except ConfigError as exc:
+        typer.echo(f"CONFIG ERROR  {exc}", err=True)
+        raise typer.Exit(1) from exc
     log_file = configure_logging()
     modes = integration_modes()
+    results = {c.service: c for c in run_checks()}
     typer.echo("revos run: Agentic Revenue OS")
     for mode in modes:
-        typer.echo(f"  {mode.line()}")
+        check = results.get(mode.service)
+        typer.echo("  " + mode.line_with(check.status if check else None, check.detail if check else ""))
     typer.echo(f"  API           {'off' if no_api else f'http://127.0.0.1:{port}'}   logs: {log_file}")
+    if bypass:
+        typer.echo(f"  !! {BYPASS_BANNER}. Allowlist, caps, suppression and the kill switch still apply.")
+        log("run", BYPASS_BANNER, level="warning")
 
-    failed = [c for c in run_checks() if c.status == FAILED
+    failed = [c for c in results.values() if c.status == FAILED
               and any(m.service == c.service and m.mode == REAL for m in modes)]
     for check in failed:
         log("run", f"{check.service} will run as REAL but its check failed", level="error",
@@ -249,6 +287,7 @@ def run(
 @app.command("seed")
 def seed(
     tag: str = typer.Argument("acme", help="makes the lead name+tag@<your prospect inbox>"),
+    profile: str = typer.Option(None, "--profile", help="hot, warm or cold: lead data from the fixture"),
     company: str = typer.Option("Brightside Optical Group", help="a fictional company"),
     domain: str = typer.Option("brightside-optical.example", help="its (fictional) web domain"),
     contact: str = typer.Option("Sam Lee", help="a fictional contact name"),
@@ -272,12 +311,21 @@ def seed(
         typer.echo(f"no segment pack {segment!r}; have: {', '.join(sorted(packs))}", err=True)
         raise typer.Exit(1)
     email = demo_address(tag)
+    fields: dict | None = None
+    if profile:
+        from revos.seed import PROFILE_NAMES, load_profiles
+        if profile not in PROFILE_NAMES:
+            typer.echo(f"--profile must be one of {', '.join(PROFILE_NAMES)}", err=True)
+            raise typer.Exit(1)
+        chosen = load_profiles(segment)[profile]
+        company, domain, contact, fields = (chosen["company"], chosen["domain"], chosen["contact"],
+                                            chosen["fields"])
     with connect() as conn:
         conn.autocommit = True
         migrate(conn)
         deal_id, created = seed_one(conn, SystemClock(), segment_id=segment,
                                     pack_version=str(packs[segment].meta.version), company=company,
-                                    domain=domain, contact_name=contact, email=email)
+                                    domain=domain, contact_name=contact, email=email, fields=fields)
     typer.echo(f"{'seeded' if created else 'already seeded'}: deal {deal_id} for {email}")
 
 
