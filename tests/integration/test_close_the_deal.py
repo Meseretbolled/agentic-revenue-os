@@ -268,7 +268,6 @@ def test_a_valid_io_is_built_validated_approved_and_sent_for_signature_in_test_m
     ({"start": "02/11/2026"}, "io_start_date is not a valid date"),
     ({"items": [{"id": "multi_location", "quantity": 2, "unit_price": 1}]}, "does not match the rate card"),
     ({"items": [{"id": "gold_plated", "quantity": 1}]}, "not on the rate card"),
-    ({"items": []}, "no IO line items"),
     ({"items": [{"id": "multi_location", "quantity": 0}]}, "positive quantity"),
     ({"discount_pct": -5}, "discount_pct must be a number"),
 ])

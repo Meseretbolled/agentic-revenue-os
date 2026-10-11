@@ -416,3 +416,17 @@ make live-gmail                    # sends ONE email to PROSPECT_TEST_EMAIL, che
 .venv/bin/python scripts/gmail_reply_check.py   # reply by hand; shows the reply fetched, matched, delivered once
 make live-hubspot                  # hubspot-setup, then the live tests (one fictional contact/company/deal, cleaned up)
 ```
+
+## IO terms are proposed automatically
+
+When the qualification gate moves a deal to `qualified`, the IO planner (`revos/skills/io_terms.py`) proposes
+the terms from the call fields and the pack's SAMPLE rate card, then `validate_io` checks them in code:
+
+- **Package**: the largest package whose `min_monthly_budget_usd` the stated monthly budget reaches (a budget
+  with no stated period is not guessed; a person is asked).
+- **Start date**: the first Monday on or after today + `io_min_lead_days`; a timeline too tight for that needs a person.
+- **Term**: `io_default_term_months`; quantities are per month times months, with `location_count` capped by the pack.
+- **Discount**: 0 unless the pack's `volume_discounts` say otherwise. Over the pack maximum is a hard block, no override.
+- **A person** is involved only when a term falls outside the pack's limits (`io.terms_need_a_person` audit).
+- `revos io-terms` stays as an override; it is audited as `deal.io_terms_set` with source `override` (planner: `auto`)
+  and the planner never replaces terms already set.

@@ -258,6 +258,8 @@ class PolicyPack(Strict):
     io_budget_max_usd: float = Field(default=2_000_000, gt=0)
     io_max_term_months: int = Field(default=24, gt=0)
     io_payment_terms: str = "Net 30 (SAMPLE terms)"
+    io_min_lead_days: int = Field(default=14, ge=0)       # setup time before an IO can start
+    io_default_term_months: int = Field(default=3, gt=0)  # the term when nothing else is stated
 
     @field_validator("autonomy_levels")
     @classmethod
@@ -387,10 +389,32 @@ class RateItem(Strict):
     price: float = Field(gt=0)
 
 
+class PackageLine(Strict):
+    id: str = Field(pattern=ID)                       # a rate card item
+    quantity: float = Field(gt=0, default=1)          # per month (or 1 for a percentage fee)
+    quantity_from: str | None = None                  # a lead field (location_count) that sets the quantity
+    quantity_max: float | None = Field(default=None, gt=0)
+
+
+class Package(Strict):
+    id: str = Field(pattern=ID)
+    name: str = Field(min_length=1)
+    min_monthly_budget_usd: float = Field(ge=0)       # chosen when the stated budget reaches this
+    lines: list[PackageLine] = Field(min_length=1)
+
+
+class VolumeDiscount(Strict):
+    min_monthly_budget_usd: float = Field(ge=0)
+    discount_pct: float = Field(ge=0, le=100)
+
+
 class RateCard(Strict):
     label: str
     currency: str = Field(min_length=3, max_length=3)
     items: list[RateItem] = Field(min_length=1)
+    # SAMPLE packages the IO planner chooses from by budget, and the only discounts it may apply.
+    packages: list[Package] = Field(default_factory=list)
+    volume_discounts: list[VolumeDiscount] = Field(default_factory=list)
 
     # Honesty rule: COOL publishes no rate card, so ours must say it is a sample.
     @field_validator("label")

@@ -285,7 +285,8 @@ def test_a_short_summary_is_posted_to_slack_once(conn, ro_conn, pack, clock, tes
     posts = [p for p in s.slack.posts if "Call processed" in p.text]
     assert len(posts) == 1 and posts[0].channel == CHANNEL
     body = json.dumps(posts[0].blocks)
-    assert "qualified" in body and "budget" in body and "Maya Ortiz" in body
+    assert any(s in body for s in ("qualified", "proposal", "io_approval", "out_for_signature"))
+    assert "budget" in body and "Maya Ortiz" in body
 
 
 # --- idempotence --------------------------------------------------------------------------------------------------------------

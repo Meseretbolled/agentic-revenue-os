@@ -461,3 +461,27 @@ def test_the_veto_window_follows_a_deliberate_override_and_otherwise_the_packs_o
         window = conn.execute("SELECT veto_until - %s FROM actions WHERE id = %s", (clock.now(), action)
                               ).fetchone()[0]
         assert window.total_seconds() == expected
+
+
+def test_a_send_that_fails_after_the_window_released_it_is_retried_and_sent_once(s):
+    from revos.adapters.mock.mailer import MockMailer
+    from revos.domain.errors import RevosError
+
+    class Down(MockMailer):
+        failing = True
+
+        def perform(self, action):
+            if self.failing:
+                raise RevosError("mail is down")
+            return super().perform(action)
+
+    mailer = Down()
+    s.rig.orch.provider._routes["first_touch"] = mailer
+    action = s.hot_first_touch()
+    s.drain(61)                                    # the window ends, the release succeeds, the send fails
+    assert status(s.conn, action)[0] == "approved" and sent_count(s.conn) == 0
+    mailer.failing = False
+    s.drain(3600)                                  # the job's retry
+    s.drain(3600)
+    assert status(s.conn, action)[0] == "sent" and sent_count(s.conn) == 1
+    assert len(mailer.sent) == 1

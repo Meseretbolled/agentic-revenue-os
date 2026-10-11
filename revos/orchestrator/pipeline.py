@@ -66,6 +66,7 @@ from revos.skills.claims import deterministic_check
 from revos.skills.crm_fields import call_summary, outreach_status, sequence_day
 from revos.skills.handoff import build_handoff
 from revos.skills.io import validate_io
+from revos.skills.io_terms import propose_io_terms
 from revos.skills.scoring import score_lead
 from revos.skills.slots import resolve_tz, slot_text
 from revos.slack.notifier import POSTED_TYPES
@@ -663,11 +664,38 @@ class Orchestrator:
 
     # --- a person enters terms or approves a discount (agents cannot) -----------------------------
     def set_io_terms(self, deal_id: UUID, *, items: list[dict[str, Any]], start: str, end: str,
-                     discount_pct: float, actor: str) -> None:
+                     discount_pct: float, actor: str, detail: Mapping[str, Any] | None = None) -> None:
+        """Set the IO's terms. `actor` 'io-planner' is the automatic proposal; anyone else is a person's
+        override. Both are audited, and a person's override is never replaced by a proposal."""
+        source = "auto" if actor == "io-planner" else "override"
         self._merge_fields(deal_id, {"io_items": items, "io_start_date": start, "io_end_date": end,
-                                     "discount_pct": discount_pct})
+                                     "discount_pct": discount_pct, "io_terms_source": source})
         write_audit(self.conn, actor, "deal.io_terms_set", deal_id,
-                    {"items": items, "start": start, "end": end, "discount_pct": discount_pct})
+                    {"items": items, "start": start, "end": end, "discount_pct": discount_pct,
+                     "source": source, **(dict(detail) if detail else {})})
+
+    def _propose_terms(self, deal_id: UUID) -> PipelineResult | None:
+        """No terms yet: work them out from the call and the pack's SAMPLE rate card. Returns a result only
+        when a person is needed (a term outside the pack's limits); None when terms are now in place."""
+        deal = self._deal(deal_id)
+        fields = clean_fields(deal["fields"] or {})
+        if fields.get("io_items"):
+            return None                                     # a person's terms (or an earlier proposal) stand
+        proposal = propose_io_terms(self._pack(deal), fields, self.clock.now().date())
+        if not proposal.ok:
+            write_audit(self.conn, "io-planner", "io.terms_need_a_person", deal_id, {
+                "reasons": list(proposal.needs_a_person), "package": proposal.package_id,
+                "monthly_budget_usd": proposal.monthly_budget_usd})
+            why = "; ".join(proposal.needs_a_person)
+            return PipelineResult("needs_human", deal["stage"], self.runner.name,
+                                  f"IO terms fall outside the pack's limits: {why}")
+        self.set_io_terms(deal_id, items=list(proposal.items), start=proposal.start, end=proposal.end,
+                          discount_pct=proposal.discount_pct, actor="io-planner", detail={
+                              "package": proposal.package_id, "notes": list(proposal.notes),
+                              "monthly_budget_usd": proposal.monthly_budget_usd,
+                              "budget_quote": fields.get("quote:budget"),
+                              "timeline_quote": fields.get("quote:timeline"), "deadline": proposal.deadline})
+        return None
 
     # --- the qualification gate -------------------------------------------------------------------
     def run_qualification_gate(self, deal_id: UUID) -> PipelineResult:
@@ -703,7 +731,10 @@ class Orchestrator:
                                            DealStage.IO_APPROVAL}:
             return PipelineResult("held", deal["stage"], self.runner.name,
                                   f"an IO needs a qualified deal, this one is in {deal['stage']}")
-        fields = deal["fields"] or {}
+        needs_person = self._propose_terms(deal_id)
+        if needs_person is not None:
+            return needs_person
+        fields = self._deal(deal_id)["fields"] or {}
         step = "io." + canonical_hash({k: fields.get(k) for k in IO_KEYS})
         try:
             self.advance(deal_id, DealStage.PROPOSAL, "building the IO")
@@ -918,6 +949,10 @@ class Orchestrator:
                 write_audit(self.conn, "orchestrator", "call.qualification", deal_id, {
                     "transcript": transcript_id, "result": gate.status, "note": gate.reason,
                     "stage": gate.stage})
+                if DealStage(self._deal(deal_id)["stage"]) is DealStage.QUALIFIED:
+                    io = self.handle_io(deal_id)               # qualified: the IO follows by itself
+                    write_audit(self.conn, "orchestrator", "call.io", deal_id, {
+                        "transcript": transcript_id, "result": io.status, "note": io.reason})
         except Exception:
             self.conn.execute("DELETE FROM transcripts WHERE id = %s", (first[0],))   # let the poll retry
             raise
@@ -1314,8 +1349,13 @@ class Orchestrator:
             self.send_action(UUID(job.payload["action_id"]))
 
         def veto_expired(_conn: psycopg.Connection, job: Any) -> None:
-            for action_id in release_veto_expired(self.conn, self.clock):
+            released = release_veto_expired(self.conn, self.clock)
+            for action_id in released:
                 self._notify(action_id)
+            # Also the action this timer is for: if a first attempt to send it failed (mail was down) the
+            # window is already released, so only this retry can still send it. send_action is idempotent.
+            own = [UUID(job.payload["action_id"])] if job.payload.get("action_id") else []
+            for action_id in dict.fromkeys([*released, *own]):
                 self.send_action(action_id)
 
         def snooze_ended(_conn: psycopg.Connection, job: Any) -> None:

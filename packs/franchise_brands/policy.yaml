@@ -35,3 +35,5 @@ io_budget_min_usd: 5000
 io_budget_max_usd: 2000000
 io_max_term_months: 24
 io_payment_terms: "Net 30 (SAMPLE terms, to be replaced by the real agreement)"
+io_min_lead_days: 14
+io_default_term_months: 3
