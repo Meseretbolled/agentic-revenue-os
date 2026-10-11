@@ -323,6 +323,12 @@ class Orchestrator:
                 self._effect(atype, deal, pack, payload, run)
             elif atype in SENDABLE and action["status"] in {"approved", "pending"}:
                 self._queue_send(action, key)
+            if payload.get("fallback") and proposal.created:
+                write_audit(self.conn, "orchestrator", "draft.fell_back_to_template", deal_id, {
+                    "action_id": str(action["id"]), "template": payload.get("template"),
+                    "checks_failed": payload["fallback"]["checks_failed"],
+                    "attempts": payload["fallback"]["attempts"],
+                    "reason": "the model-written text failed a check; the pack's own wording was used"})
             if payload.get("lesson_ids") and proposal.created:
                 write_audit(self.conn, "orchestrator", "lesson.cited", deal_id, {
                     "action_id": str(action["id"]), "action_type": atype,
@@ -881,7 +887,8 @@ class Orchestrator:
             if label == "interested" and not already_booked:   # route: offer meeting times
                 meeting = self.run_agent(
                     deal_id, "meeting", f"meeting:{email.message_id}",
-                    slots=self._slots(deal_id, email.body), input_={"reply_label": label})
+                    slots=self._slots(deal_id, email.body), input_={"reply_label": label},
+                    untrusted={"reply": reply})
                 runs.append(("meeting", meeting.status))
                 if meeting.status != "completed":
                     return done("needs_human", meeting.human_reason, label)

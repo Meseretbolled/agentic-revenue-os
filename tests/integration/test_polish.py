@@ -62,30 +62,24 @@ def test_a_reply_class_without_its_own_wording_gets_the_default_acknowledgement(
     assert pack.messaging.snippets["reply_ack_interested"] not in body
 
 
-def test_the_wording_is_in_the_pack_and_the_claim_checker_still_applies(conn, ro_conn, pack, clock, monkeypatch):
+def test_the_wording_is_in_the_pack(pack):
     assert "Thanks for getting back to me" in pack.messaging.templates["meeting_offer"].body
-    broken = pack.messaging.snippets["reply_ack_interested"]
-    rig = make_rig(conn, ro_conn, pack, clock)
-    # a snippet that smuggles in an undeclared number is not approved text once the pack changes
-    smuggled = broken + " We grew 500% last year."
-    monkeypatch.setitem(pack.messaging.snippets, "reply_ack_interested", smuggled)       # approved: passes
-    slots = tuple(rig.world.calendar.free_slots(datetime(2026, 10, 13, 8, tzinfo=UTC),
-                                                datetime(2026, 10, 14, 18, tzinfo=UTC), 30)[:3])
-    ok = rig.orch.run_agent(rig.deal_id, "meeting", "m.2", slots=slots)
-    assert ok.status == "completed" and "500%" in ok.proposals[0]["payload"]["body"]
-    from revos.agents import meeting as meeting_agent
-    monkeypatch.setattr(meeting_agent, "draft_and_check", _tampered(meeting_agent.draft_and_check))
-    bad = rig.orch.run_agent(rig.deal_id, "meeting", "m.3", slots=slots)
-    assert bad.status == "needs_human" and "undeclared" in (bad.human_reason or "")
+    assert {"reply_ack_interested", "first_touch_fallback", "follow_up_fallback"} <= set(pack.messaging.snippets)
 
 
-def _tampered(real):
-    """Calls the real drafting step but lets the email contain a number nobody approved."""
-    def wrapper(env, name, **kw):
-        kw["extra_context"] = {**kw["extra_context"], "reply_ack": kw["extra_context"]["reply_ack"]
-                               + " It is up 73% since March."}
-        return real(env, name, **kw)
-    return wrapper
+def test_a_model_written_acknowledgement_with_an_undeclared_number_is_replaced_by_the_pack_wording(
+        conn, ro_conn, pack, clock):
+    from revos.adapters.fake_llm import FakeLLM
+    from revos.ports.llm import DraftProposal
+    bad = DraftProposal("It is up 73% since March.", ())
+    rig = make_rig(conn, ro_conn, pack, clock, llm=FakeLLM(script=[bad, bad, bad]))
+    rig.orch.handle_reply(rig.deal_id, interested())
+    offer = last_offer(conn)
+    assert "73%" not in offer["body"] and pack.messaging.snippets["reply_ack_interested"] in offer["body"]
+    assert offer["draft_source"] == "template"
+    (row,) = audit(conn, "draft.fell_back_to_template", rig.deal_id)
+    print("CODES", row["checks_failed"])
+    assert row["template"] == "meeting_offer" and row["checks_failed"]
 
 
 # --- 2. time zones ----------------------------------------------------------------------------------------------

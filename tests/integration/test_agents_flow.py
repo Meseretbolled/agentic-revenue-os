@@ -197,6 +197,16 @@ def test_llm_errors_end_the_run_as_needs_human(conn, ro_conn, pack, clock, fail,
     assert conn.execute("SELECT count(*) FROM actions WHERE type = 'first_touch'").fetchone()[0] == 0
 
 
+def assert_fell_back(conn, deal_id, code, bad_text):
+    """A failed check never reaches the prospect: the pack's own wording is used and the audit says so."""
+    (row,) = [r[0] for r in conn.execute("SELECT detail FROM audit_log WHERE event = "
+                                         "'draft.fell_back_to_template' AND deal_id = %s", (deal_id,))]
+    assert code in row["checks_failed"] and row["attempts"] >= 1
+    (payload,) = [r[0] for r in conn.execute("SELECT payload FROM actions WHERE type = 'first_touch'")]
+    assert payload["draft_source"] == "template" and bad_text not in payload["body"]
+    assert "I wanted to reach out about local campaigns." in payload["body"] and payload["claims"] == []
+
+
 def test_a_verifier_failure_goes_to_a_person_and_is_never_assumed_supported(conn, ro_conn, pack, clock):
     rig, result = run_slice(conn, ro_conn, pack, clock,
                             llm=FakeLLM(fail={"verify_claims": LLMError("verifier down")}))
@@ -207,8 +217,8 @@ def test_a_verifier_failure_goes_to_a_person_and_is_never_assumed_supported(conn
 def test_unsupported_claims_after_regeneration_go_to_a_person(conn, ro_conn, pack, clock):
     rig, result = run_slice(conn, ro_conn, pack, clock,
                             llm=FakeLLM(script=[BAD_DRAFT, BAD_DRAFT, BAD_DRAFT]))
-    assert result.status == "needs_human" and "unsupported_in_claim" in result.reason
-    assert conn.execute("SELECT count(*) FROM actions WHERE type = 'first_touch'").fetchone()[0] == 0
+    assert result.status == "action_proposed"
+    assert_fell_back(conn, rig.deal_id, "unsupported_in_claim", "999")
 
 
 def test_a_lead_the_site_cannot_describe_stops_at_exit_criteria(conn, ro_conn, pack, clock):

@@ -197,6 +197,30 @@ startup error, in `revos run`, `revos doctor` and the composition root). While i
 `send_window.bypassed` audit row with the reason. The recipient allowlist, caps, suppression, the kill
 switch and hard blocks are untouched (there is a test for each).
 
+### How each email is produced (`LLM_MODE=fake` vs `live`)
+
+Code (the pack's `messaging.yaml` templates and snippets) writes the greeting, the product wording, case
+studies, meeting times, the sign-off, the unsubscribe line and the postal address. The model, when there is
+one, writes ONE short paragraph per email and nothing else.
+
+| Email | Template (code) | Model-written paragraph | Fallback if a check fails |
+|---|---|---|---|
+| first touch | greeting, pillar wording, case study, ask, footer | personal opening from the lead's sourced facts, tone rules, cited lesson ids | `first_touch_fallback` snippet |
+| reply / meeting times | "Thanks for getting back to me, Maya.", slot list (code, in the prospect's zone), intro, footer | the acknowledgement, written from the (fenced) reply text | the `reply_ack_*` snippet |
+| follow-up | greeting, pillar wording, footer | personal opening | `follow_up_fallback` snippet |
+| confirmation | all of it (exact time + invite) | none, by design | n/a |
+| case-study answer | all of it (stored facts only) | none, by design | n/a |
+
+`fake`: the deterministic `FakeLLM` writes the paragraph from the first fact (no key, no network).
+`live`: the Claude Agent SDK writes it (Sonnet for drafting, Haiku for classification, a spend-capped
+ledger reserving before every call). Checks on the model's text, in order: the injection scanner on what it
+wrote, the footer (unsubscribe line and postal address still in the finished email), the deterministic claim
+checker (every number, date and name must be in the cited evidence or approved wording), then a model
+verifier for meaning. Up to two regenerations with the issues as feedback; if a CHECK still fails the email is
+rebuilt from the pack's wording and a `draft.fell_back_to_template` audit row records which checks failed.
+A model error, a spend-cap stop or an unavailable verifier is not papered over: the run goes to a person.
+The Gmail mailer and the send gate still enforce the footer and the recipient allowlist on whatever is sent.
+
 ### Per-domain cap: `DOMAIN_CAP_MODE`
 
 The pack's per-domain daily cap is the default (`enforce`). Because every demo email goes to one domain,

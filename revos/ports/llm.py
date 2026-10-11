@@ -38,6 +38,10 @@ class DraftRequest:
     context: Mapping[str, Any]           # company, first_name, sender_name, unsubscribe_line, ...
     evidence: Evidence
     feedback: tuple[str, ...] = ()       # issues from the previous attempt
+    purpose: str = "first_touch"         # first_touch | follow_up | reply_ack: what the line is for
+    tone: tuple[str, ...] = ()           # the pack's tone rules
+    lessons: tuple[Mapping[str, Any], ...] = ()   # cited lessons: {"id", "text"}; an angle, never a fact
+    reply: UntrustedText | None = None   # the prospect's reply, fenced as untrusted data
 
 
 @dataclass(frozen=True)

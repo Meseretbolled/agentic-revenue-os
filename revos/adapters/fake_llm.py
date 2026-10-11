@@ -114,6 +114,8 @@ class FakeLLM:
         self.feedback_seen.append(request.feedback)
         if self._script:
             return self._script.popleft()
+        if request.purpose == "reply_ack":       # a reply needs no fact: acknowledge it, claim nothing
+            return DraftProposal(str(request.context.get("reply_ack", "Thanks for your reply.")), ())
         items = list(request.evidence.items.values())
         if not items:
             return DraftProposal("I wanted to reach out about local campaigns.", ())

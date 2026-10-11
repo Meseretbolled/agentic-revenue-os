@@ -247,6 +247,9 @@ def test_an_email_that_used_a_lesson_still_passes_the_claim_checker(conn, ro_con
     assert pack.messaging.pillars[1].body.split()[0] in payload["body"]
 
 
+from tests.integration.test_agents_flow import assert_fell_back  # noqa: E402
+
+
 def test_a_number_from_a_lesson_cannot_be_smuggled_into_the_email(conn, ro_conn, pack, clock):
     lesson_text = "40% of owners worry about brand compliance"
     bad = DraftProposal("I noticed that 40% of owners worry about compliance",
@@ -255,8 +258,8 @@ def test_a_number_from_a_lesson_cannot_be_smuggled_into_the_email(conn, ro_conn,
     insert_lesson(conn, lesson_text, ["compliance"], pack.id)
     conn.execute("UPDATE deals SET fields = %s", ('{"objections": "brand compliance worries owners"}',))
     result = rig.orch.handle_lead_created(rig.deal_id)
-    assert result.status == "needs_human" and "unsupported_in_claim" in result.reason
-    assert conn.execute("SELECT count(*) FROM actions WHERE type = 'first_touch'").fetchone()[0] == 0
+    assert result.status == "action_proposed"
+    assert_fell_back(conn, rig.deal_id, "unsupported_in_claim", "40%")
 
 
 def test_a_lesson_cannot_be_cited_as_evidence_for_a_claim(conn, ro_conn, pack, clock):
@@ -266,7 +269,8 @@ def test_a_lesson_cannot_be_cited_as_evidence_for_a_claim(conn, ro_conn, pack, c
     lesson_id = insert_lesson(conn, "owners worry about compliance", ["compliance"], pack.id)
     conn.execute("UPDATE deals SET fields = %s", ('{"objections": "compliance"}',))
     result = rig.orch.handle_lead_created(rig.deal_id)
-    assert result.status == "needs_human" and "claim_unknown_evidence" in result.reason
+    assert result.status == "action_proposed"
+    assert_fell_back(conn, rig.deal_id, "claim_unknown_evidence", "owners worry")
     assert lesson_id
 
 

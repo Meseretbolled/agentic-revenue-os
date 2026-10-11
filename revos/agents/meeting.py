@@ -17,8 +17,8 @@ def run(env: AgentEnv) -> AgentOutput:
     ack = snippets.get(f"reply_ack_{label}") or snippets["reply_ack_default"]
     intro = snippets["slots_intro_local" if tz else "slots_intro_utc"]
     drafted = draft_and_check(
-        env, "meeting_offer", use_case_study=False, use_model=False,
-        extra_context={"slots_text": slots_text, "reply_ack": ack, "slots_intro": intro},
+        env, "meeting_offer", use_case_study=False, purpose="reply_ack", fallback_line=ack,
+        extra_context={"slots_text": slots_text, "slots_intro": intro, "reply_ack": ack},
         extra_approved=[slots_text, ack, intro])
     outcome = drafted.outcome
     if outcome.error is not None:
@@ -34,7 +34,11 @@ def run(env: AgentEnv) -> AgentOutput:
         "case_study_id": None, "lesson_ids": [], "citations": {"lessons": []},
         "slots": [s.start.isoformat() for s in env.slots[:3]],            # always UTC
         "timezone": getattr(tz, "key", None), "slots_shown": slots_text.splitlines(),
-        "attempts": outcome.attempts, "template": "meeting_offer", "approved_extra": [slots_text]},
+        "attempts": outcome.attempts, "template": "meeting_offer",
+        "approved_extra": [slots_text, ack, intro],
+        "draft_source": "template" if outcome.fallback else "model",
+        **({"fallback": {"checks_failed": list(outcome.fallback), "attempts": outcome.attempts}}
+           if outcome.fallback else {})},
         cited, "meeting times offered")
 
     company = env.tools.call("crm.get_company", {"company_id": str(env.company_id)})

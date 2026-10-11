@@ -15,7 +15,7 @@ from revos.domain.drafting import Evidence
 from revos.ports.llm import DraftProposal, DraftRequest
 from revos.segments.schema import CaseStudy
 from revos.skills.angle import choose_pillar
-from revos.skills.drafting import DraftOutcome, draft_with_checks
+from revos.skills.drafting import DraftOutcome, draft_with_checks, draft_with_fallback
 
 
 @dataclass(frozen=True)
@@ -36,8 +36,12 @@ class _NoModel:
         return DraftProposal("", ())
 
 
+_FALLBACK_SNIPPET = {"first_touch": "first_touch_fallback", "follow_up": "follow_up_fallback"}
+
+
 def draft_and_check(env: AgentEnv, template_name: str, *, use_case_study: bool = True,
-                    use_model: bool = True, extra_context=None, extra_approved=()) -> Drafted:
+                    use_model: bool = True, extra_context=None, extra_approved=(),
+                    purpose: str | None = None, fallback_line: str | None = None) -> Drafted:
     """Gather context through scoped tools, let the lessons choose the angle, draft with the model,
     check with code. Shared with the meeting agent, which writes a different email the same way."""
     tools = env.tools
@@ -64,9 +68,16 @@ def draft_and_check(env: AgentEnv, template_name: str, *, use_case_study: bool =
                **(extra_context or {})}
     approved, names = check_inputs(env.pack, template, env.identity, company["name"],
                                    contact.get("full_name"), study, extra_approved)
-    request = DraftRequest(template.subject, template.body, context, evidence)
-    outcome = draft_with_checks(env.judge if use_model else _NoModel(), request, approved, names,
-                                env.verifier)
+    fallback = fallback_line or env.pack.messaging.snippets[
+        _FALLBACK_SNIPPET.get(template_name, "reply_ack_default")]
+    approved.append(fallback)
+    request = DraftRequest(
+        template.subject, template.body, context, evidence, purpose=purpose or template_name,
+        tone=tuple(env.pack.messaging.tone),
+        lessons=tuple({"id": x["id"], "text": x["text"]} for x in lessons if x["id"] in shaping),
+        reply=env.untrusted.get("reply"))
+    outcome = (draft_with_fallback(env.judge, request, approved, names, env.verifier, fallback)
+               if use_model else draft_with_checks(_NoModel(), request, approved, names, env.verifier))
     return Drafted(outcome, study, lessons, shaping, pillar.id, deal, evidence)
 
 
@@ -93,6 +104,9 @@ def run(env: AgentEnv) -> AgentOutput:
                                           "confidence": by_id.get(i, {}).get("confidence", 0)}
                                          for i in drafted.shaping]},
                "attempts": outcome.attempts, "tier": clean_fields(drafted.deal)["tier"],
-               "template": template, "approved_extra": []}
+               "template": template, "approved_extra": [],
+               "draft_source": "template" if outcome.fallback else "model",
+               **({"fallback": {"checks_failed": list(outcome.fallback), "attempts": outcome.attempts}}
+                  if outcome.fallback else {})}
     return AgentOutput((make(kind, env.deal_id, env.contact_id, payload, cited,
                              f"{kind.replace('_', ' ')} drafted from {len(cited)} cited fact(s)"),))

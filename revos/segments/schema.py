@@ -311,7 +311,7 @@ class Messaging(Strict):
     @classmethod
     def _required_snippets(cls, value: dict[str, str]) -> dict[str, str]:
         missing = sorted({"reply_ack_interested", "reply_ack_default", "slots_intro_local",
-                          "slots_intro_utc"} - set(value))
+                          "slots_intro_utc", "first_touch_fallback", "follow_up_fallback"} - set(value))
         if missing:
             raise ValueError("missing snippet(s): " + ", ".join(missing))
         return value

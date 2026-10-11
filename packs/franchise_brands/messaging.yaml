@@ -27,6 +27,8 @@ snippets:
   # Wording for the email that follows a reply. {{ first_name }} is filled in by the code.
   reply_ack_interested: "Glad this is relevant, and happy to find a time to talk."
   reply_ack_default: "I appreciate you taking the time to reply."
+  first_touch_fallback: "I wanted to reach out about local campaigns."
+  follow_up_fallback: "I wanted to follow up on my earlier note about local campaigns."
   slots_intro_local: "Here are a few times that work on our side, shown in your time zone:"
   slots_intro_utc: "Here are a few times that work on our side. I do not have your time zone yet, so these are in UTC:"
 
@@ -79,7 +81,7 @@ templates:
     body: |
       Hi {{ first_name }},
 
-      Thanks for getting back to me, {{ first_name }}. {{ reply_ack }}
+      Thanks for getting back to me, {{ first_name }}. {{ personalised_line }}
 
       {{ slots_intro }}
       {{ slots_text }}

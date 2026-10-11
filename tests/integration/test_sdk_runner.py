@@ -106,16 +106,19 @@ def test_the_slice_under_the_sdk_runner_records_runner_cost_and_calls(conn, ro_c
     assert runner.judges[0].results[0].model == "draft-model"
 
 
+from tests.integration.test_agents_flow import assert_fell_back  # noqa: E402
+
+
 def test_the_sdk_answer_is_still_checked_by_code(conn, ro_conn, pack, clock):
     lie = json.dumps({"personalised_line": "I noticed 999 stores",
                       "claims": [{"text": "I noticed 999 stores", "evidence": ["F1"]}]})
     query = FakeQuery(reply=lie)
     rig, _ = sdk_rig(conn, ro_conn, pack, clock, query)
     result = rig.orch.handle_lead_created(rig.deal_id)
-    assert result.status == "needs_human" and "unsupported_in_claim" in result.reason
+    assert result.status == "action_proposed"            # the lie is replaced by the pack's wording
     assert len(query.options) == 3                       # drafted once, regenerated twice, then stopped
     assert "999" in query.prompts[1]                     # the issues went back as feedback
-    assert conn.execute("SELECT count(*) FROM actions WHERE type = 'first_touch'").fetchone()[0] == 0
+    assert_fell_back(conn, rig.deal_id, "unsupported_in_claim", "999")
 
 
 @pytest.mark.parametrize("reply", ["no json here", '{"claims": []}', '["a"]', ""])
