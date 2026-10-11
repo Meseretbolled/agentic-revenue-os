@@ -22,6 +22,8 @@ franchise_brands:
     contact: Maya Ortiz
     expect_tier: A
     signer_email_tag: signer-harborview
+    signer_name: Marcus Reyes            # the lead record's signer (fictional); a call can only add a name
+    signer_role: VP of Marketing
     signer_note: fictional demo signer (invented for this demo)
     timezone: America/Chicago
     research_notes:

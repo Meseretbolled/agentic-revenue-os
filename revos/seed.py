@@ -31,6 +31,8 @@ def load_profiles(segment_id: str, path: Path = PROFILES_FILE) -> dict[str, dict
         missing = {"company", "domain", "contact", "fields"} - set(profile)
         if missing:
             raise ValueError(f"seed profile {name!r} lacks {', '.join(sorted(missing))}")
+        if bool(profile.get("signer_name")) != bool(profile.get("signer_role")):
+            raise ValueError(f"seed profile {name!r}: signer_name and signer_role go together")
         for note in profile.get("research_notes", []):
             if not str(note.get("text", "")).strip() or not str(note.get("source", "")).lower().startswith(
                     "fictional demo profile"):

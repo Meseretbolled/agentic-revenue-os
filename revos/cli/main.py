@@ -93,6 +93,70 @@ def calls_assign(transcript_id: str, deal_id: str) -> None:
     typer.echo(f"{transcript_id}: {outcome} for deal {deal_id}")
 
 
+@app.command("io-terms")
+def io_terms(
+    deal_id: str,
+    items_arg: str = typer.Option(None, "--items", help="item=quantity,... (multi_location=120,...)"),
+    start: str = typer.Option(None, help="start date, YYYY-MM-DD"),
+    end: str = typer.Option(None, help="end date, YYYY-MM-DD"),
+    discount: float = typer.Option(0.0, help="discount percent (over the pack maximum is a hard block)"),
+) -> None:
+    """The deal desk sets the IO's line items, term and discount for a deal (audited as 'deal-desk')."""
+    from uuid import UUID
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    load_env_file()
+    if not items_arg or not start or not end:
+        typer.echo("give --items, --start and --end", err=True)
+        raise typer.Exit(2)
+    items = []
+    for entry in items_arg.split(","):
+        name, _, quantity = entry.partition("=")
+        if not name or not quantity.replace(".", "", 1).isdigit():
+            typer.echo(f"--items must look like name=quantity,..., got {entry!r}", err=True)
+            raise typer.Exit(2)
+        items.append({"id": name, "quantity": float(quantity) if "." in quantity else int(quantity)})
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        orch = build_orchestrator(conn, ro, SystemClock())
+        orch.set_io_terms(UUID(deal_id), items=items, start=start, end=end, discount_pct=discount,
+                          actor="deal-desk")
+    typer.echo(f"IO terms set for {deal_id}: {items}, {start} to {end}, {discount}% discount")
+
+
+@app.command("io")
+def io_command(deal_id: str) -> None:
+    """Build and validate the IO for a QUALIFIED deal and show the validation; if it passes, the policy
+    decides about sending it for signature (test mode)."""
+    from uuid import UUID
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    from revos.skills.io import validate_io
+    load_env_file()
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        clock = SystemClock()
+        orch = build_orchestrator(conn, ro, clock)
+        deal = orch._deal(UUID(deal_id))
+        check = validate_io(orch._pack(deal), deal["fields"] or {}, today=clock.now().date(),
+                            signer_allowed=orch._signer_allowed())
+        typer.echo(f"validation: {'OK' if check.ok else 'FAILED'}; total {check.total}; "
+                   f"budget {check.budget_usd}; term {check.term_months} months; "
+                   f"payment terms {check.payment_terms}")
+        for problem in check.problems:
+            typer.echo(f"  problem: {problem}")
+        result = orch.handle_io(UUID(deal_id))
+    typer.echo(f"result: {result.status} (stage {result.stage}); {result.reason or ''}")
+
+
 @app.command("call-demo")
 def call_demo() -> None:
     """Feed a scripted, fictional call through the same transcript port the real Fireflies adapter
@@ -455,6 +519,9 @@ def seed(
                                          if chosen.get("research_notes") else {})}
         if chosen.get("signer_email_tag"):
             fields["signer_email"] = demo_address(chosen["signer_email_tag"])      # the lead record's signer
+        for key in ("signer_name", "signer_role"):
+            if chosen.get(key):
+                fields[key] = chosen[key]
         if signer_email:
             fields["signer_email"] = (os.environ.get("GMAIL_ADDRESS", "").strip().lower()
                                       if signer_email.strip().lower() == "sender"

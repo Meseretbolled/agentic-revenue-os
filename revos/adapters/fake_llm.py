@@ -40,14 +40,16 @@ _REPLY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("question", ("?",)),
 )
 
-_CALL_RULES: dict[str, tuple[str, ...]] = {
+_CALL_RULES: dict[str, tuple[str, ...]] = {          # the best evidence first
     "budget": ("budget",),
-    "timeline": ("timeline", "by q", "weeks", "months", "launch", "deadline"),
-    "decision_maker": ("decision maker", "decision-maker", "approve this"),
-    "signer": ("will sign", "is the signer", "signs the", "signatory"),
-    "needs": ("we need", "looking for", "need to", "challenge"),
+    "timeline": ("timeline", "launch", "within", "before the", "by q", "deadline", "weeks", "months"),
+    "decision_maker": ("our vp", "our cmo", "our ceo", "our head of", "decision maker", "decision-maker",
+                       "approve this"),
+    "signer": ("will sign", "is the signer", "signs the", "signatory", "can sign", "signs anything"),
+    "needs": ("we need", "looking for", "need to", "the problem is", "the pain is", "challenge"),
     "objections": ("concern", "worried", "too expensive", "not sure", "cpm"),
-    "competitors": ("competitor", "currently use", "we use ", "compared to", "versus", "evaluating"),
+    "competitors": ("competitor", "currently use", "we use ", "compared to", "versus", "evaluating",
+                    "self serve", "self-serve", "platform plus"),
     "next_steps": ("next step", "send me", "follow up", "schedule", "let's meet", "send over"),
 }
 
@@ -112,10 +114,11 @@ class FakeLLM:
         fields: dict[str, ExtractedField] = {}
         for name in wanted:
             needles = _CALL_RULES.get(name, (name.replace("_", " "),))
-            for sentence in sentences:
-                if (any(n in sentence.casefold() for n in needles) and "UNTRUSTED" not in sentence
-                        and not sentence.endswith("?")):          # a question states no fact
-                    quote = re.sub(r"^[\w .'-]{1,30}:\s*", "", sentence)      # drop "Speaker:" prefix
+            statements = [s for s in sentences if "UNTRUSTED" not in s and not s.endswith("?")]   # a question
+            for needle in needles:                            # earlier needles are the better evidence
+                hit = next((s for s in statements if needle in s.casefold()), None)
+                if hit:
+                    quote = re.sub(r"^[\w .'-]{1,30}:\s*", "", hit)           # drop "Speaker:" prefix
                     fields[name] = ExtractedField(value=quote, quote=quote)
                     break
         return CallExtraction(fields)
