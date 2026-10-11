@@ -75,7 +75,7 @@ def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
         not_built("Fireflies", "FIREFLIES_API_KEY", "Step 11"),
         not_built("Dropbox Sign", "DROPBOX_SIGN_API_KEY", "Step 12"),
         not_built("Tavily", "TAVILY_API_KEY", "a later step"),
-        Mode("Tunnel URL", MOCK, "" if _has(env, "PUBLIC_BASE_URL")
+        Mode("Tunnel URL", REAL if _has(env, "PUBLIC_BASE_URL") else MOCK, "" if _has(env, "PUBLIC_BASE_URL")
              else "PUBLIC_BASE_URL is not set: Slack buttons will not work"),
     ]
 
