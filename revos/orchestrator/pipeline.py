@@ -1166,10 +1166,11 @@ class Orchestrator:
         self._queue_send(row, key)
         return proposal.action_id
 
-    def sync_to_crm(self, deal_id: UUID) -> list[UUID]:
+    def sync_to_crm(self, deal_id: UUID, refresh: str = "") -> list[UUID]:
         """Write the contact, company and deal (stage, score, tier, reason, outreach status, sequence
         day, call fields with quotes, lessons cited) to the CRM. The key includes a hash of the
-        content, so nothing is queued unless something changed."""
+        content, so nothing is queued unless something changed. `refresh` (the backfill's day) forces one
+        rewrite per value, so a record gets what it lacked (an owner) although its content did not change."""
         if not self.crm_sync:
             return []
         deal = self._deal(deal_id)
@@ -1197,7 +1198,7 @@ class Orchestrator:
         queued = []
         for write in filter(None, writes):
             name, payload = write
-            digest = canonical_hash(payload)
+            digest = canonical_hash(payload) + (f":{refresh}" if refresh else "")
             action_id = self._crm_action(deal_id, deal["contact_id"], f"{deal_id}:crm:{name}:{digest}",
                                          "crm_update", payload)
             if action_id:
@@ -1224,7 +1225,7 @@ class Orchestrator:
     def backfill_crm(self, deal_id: UUID) -> int:
         """Queue everything the CRM should hold about a deal that may predate this code: the deal and its
         owner, the written score and every stored email. Idempotent: what is already there queues nothing."""
-        queued = len(self.sync_to_crm(deal_id))
+        queued = len(self.sync_to_crm(deal_id, refresh=f"backfill-{self.clock.now().date()}"))
         deal = self._deal(deal_id)
         contact_email = self.conn.execute("SELECT email FROM contacts WHERE id = %s",
                                           (deal["contact_id"],)).fetchone()[0]

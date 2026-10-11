@@ -297,3 +297,33 @@ def test_hubspot_owners_says_which_scope_is_missing(monkeypatch):
     result = CliRunner().invoke(app, ["hubspot-owners"])
     assert result.exit_code == 1 and "crm.objects.owners.read" in result.output
     assert TOKEN not in result.output
+
+
+def test_an_owner_missing_because_the_scope_was_added_later_is_assigned_by_the_backfill(
+        conn, ro_conn, pack, clock):
+    fake = FakeHubSpot()
+    fake.owners_forbidden = True                                                  # the scope is not there yet
+    rig = rig_with(conn, ro_conn, pack, clock, fake)
+    first_touch_sent(rig)
+    drain(rig, conn, clock)
+    assert "hubspot_owner_id" not in deal(fake)["properties"]
+    fake.owners_forbidden, fake.owner_list = False, [SELLER]                      # the scope was added
+    rig.orch.provider.provider_for("crm_update")._owner_tried = 0.0               # the one-minute wait is over
+    rig.orch.backfill_crm(rig.deal_id)
+    drain(rig, conn, clock, rounds=8)
+    assert deal(fake)["properties"]["hubspot_owner_id"] == "9001"
+    assert contact(fake)["properties"]["hubspot_owner_id"] == "9001"
+    assert rig.orch.backfill_crm(rig.deal_id) == 0                                # same day: nothing again
+
+
+def test_the_logged_email_is_found_by_its_message_id_field_and_its_text_stays_clean():
+    from revos.adapters.hubspot.crm import email_ref
+    fake = FakeHubSpot()
+    adapter = crm(fake)
+    key = "deal:crm:email:<m1@x.example>"
+    adapter.log_email(key, contact_id="1", deal_id="2", direction="outbound", subject="s", text="just the body",
+                      at="2026-10-12T09:00:00+00:00", from_addr="a@x.example", to_addr="b@y.example")
+    (email,) = fake.objects["emails"].values()
+    assert email["properties"]["hs_email_message_id"] == email_ref(key)
+    assert email["properties"]["hs_email_text"] == "just the body"
+    assert email_ref(key) != email_ref("other:crm:email:<m1@x.example>")

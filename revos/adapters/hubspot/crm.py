@@ -8,6 +8,7 @@ is the check-before-retry lookup, perform() does the write."""
 import hashlib
 import json
 import logging
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -33,6 +34,11 @@ READ_PROPERTIES = ["revos_key", "revos_demo", "revos_deal_id", "revos_stage", "e
 def note_token(key: str) -> str:
     """An alphanumeric token written into every note so the note can be found by its key."""
     return NOTE_TOKEN_PREFIX + hashlib.sha256(key.encode()).hexdigest()[:20]
+
+
+def email_ref(key: str) -> str:
+    """The reference stored in a logged email's Message-ID field: stable for a key, found by search later."""
+    return f"<{note_token(key)}@revos.invalid>"
 
 
 def build_deal_properties(deal: Mapping[str, Any], fields: Mapping[str, Any],
@@ -71,6 +77,7 @@ class HubSpotCRM:
         self._owner_email = (owner_email or "").strip().lower() or None
         self._owner: str | None = None
         self._owner_resolved = False
+        self._owner_tried = 0.0
         self.owner_note = ""             # why no owner was set (for the CLI and the logs); never a secret
 
     # --- owners ----------------------------------------------------------------------------------------
@@ -92,8 +99,9 @@ class HubSpotCRM:
         """The HubSpot owner id new and ownerless records get: HUBSPOT_OWNER_ID, else the owner with
         HUBSPOT_OWNER_EMAIL, else the only owner there is. With several owners and no choice, none: a person
         picks (`revos hubspot-owners`). A failure to look is remembered and never blocks a write."""
-        if self._owner_resolved:
-            return self._owner
+        if self._owner_resolved and (self._owner is not None or time.monotonic() - self._owner_tried < 60):
+            return self._owner                  # a failure is retried after a minute, not cached
+        self._owner_tried = time.monotonic()
         if self._owner_id:
             self._owner, self._owner_resolved = self._owner_id, True
             return self._owner
@@ -105,6 +113,7 @@ class HubSpotCRM:
             logging.getLogger("revos.hubspot").warning(self.owner_note)
             return None
         self._owner_resolved = True
+        self.owner_note = ""
         if self._owner_email:
             hit = next((p for p in people if str(p.get("email", "")).lower() == self._owner_email), None)
             self._owner = str(hit["id"]) if hit else None
@@ -252,7 +261,7 @@ class HubSpotCRM:
             "hs_timestamp": at,
             "hs_email_direction": "EMAIL" if direction == "outbound" else "INCOMING_EMAIL",
             "hs_email_status": "SENT", "hs_email_subject": subject[:500],
-            "hs_email_text": f"{text}\n\n[{note_token(key)}] revosdemo",
+            "hs_email_text": text, "hs_email_message_id": email_ref(key),
             "hs_email_headers": json.dumps(headers)}, "associations": associations}
         for _ in range(3):
             try:
@@ -268,8 +277,9 @@ class HubSpotCRM:
         raise HubSpotUnavailable("log email", "gave up after three tries")
 
     def _find_email(self, key: str) -> str | None:
-        filters = [{"propertyName": "hs_email_text", "operator": "CONTAINS_TOKEN", "value": note_token(key)}]
-        hit = next(iter(self._c.search_all("emails", filters, ["hs_email_text"], page_size=10)), None)
+        # hs_email_text is not searchable; hs_email_message_id is, and carries our key's reference
+        filters = [{"propertyName": "hs_email_message_id", "operator": "EQ", "value": email_ref(key)}]
+        hit = next(iter(self._c.search_all("emails", filters, ["hs_email_message_id"], page_size=10)), None)
         return str(hit["id"]) if hit else None
 
     def deal_id_for(self, revos_deal_id: str) -> str | None:

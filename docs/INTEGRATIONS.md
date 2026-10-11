@@ -484,11 +484,11 @@ Pending (veto countdown, approvals, hard blocks), Queue and dead letters, Lesson
 | What | Scope |
 |---|---|
 | Owners (list, assign) | `crm.objects.owners.read` |
-| Log and look up emails | `crm.objects.emails.read` (HubSpot also accepts `sales-email-read`), plus write access to emails (creating one already works with the current key) |
+| Log and look up emails | `sales-email-read` (HubSpot accepts it instead of `crm.objects.emails.read`; verified live), plus write access to emails |
 | Notes | `crm.objects.contacts.write`, `crm.objects.deals.write` (already working) |
 | Custom properties (`revos hubspot-setup`) | `crm.schemas.contacts.write`, `crm.schemas.companies.write`, `crm.schemas.deals.write` (already working) |
 | Records | `crm.objects.contacts.read/write`, `crm.objects.companies.read/write`, `crm.objects.deals.read/write` |
 
-Checked live with the current key: owners and email lookups answer 403 MISSING_SCOPES (HubSpot names the scopes
-above); notes, properties and email creation are allowed. Email jobs that hit the missing read scope wait in the dead
+Verified live with `crm.objects.owners.read` and `sales-email-read` added: owners list, email lookup and email
+creation all work. Emails are found by `hs_email_message_id` (HubSpot does not allow searching the email text). Email jobs that hit the missing read scope wait in the dead
 letters: add the scope, then press Retry on the dashboard's Queue page (or `revos queue retry <id>`).
