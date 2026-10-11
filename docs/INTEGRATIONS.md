@@ -170,7 +170,18 @@ under "What ran live" once the owner's run is recorded. `revos call-demo` runs a
 * **After a call**: lessons are written with their evidence quote (modest starting confidence), the qualification
   gate runs and moves `meeting -> qualified` only through `transition_deal()` (or says what is missing), HubSpot gets
   the call fields, a note with the summary and lesson ids and the stage, and Slack gets a short summary.
-* `revos hubspot-setup` creates the two new properties (`revos_call_competitors`, `revos_call_next_steps`).
+* `revos hubspot-setup` creates the new properties (`revos_call_competitors`, `revos_call_next_steps` and their quotes).
+* `revos calls list` shows held calls; `revos calls assign <transcript id> <deal id>` is how a person decides which
+  deal a held call belongs to (audited as `call.assigned`, then processed like a matched call, once).
+
+What ran for real (owner's account): `revos doctor` shows Fireflies `REAL OK`; the adapter listed the owner's one
+transcript ("Harborview Optical Collective - intro call.m4a", no participants, one speaker). The title matched seven
+Harborview demo deals, so the call was **held, not guessed**; it was then assigned by hand to one deal and processed:
+four fields with verbatim quotes (budget, timeline, decision maker, objections), a lesson ("CPM objection: lead with
+ROAS evidence", confidence 0.50), the HubSpot deal fields and a call-summary note, and a Slack summary. The extraction
+there ran on the offline rules model (`LLM_MODE=fake`), so it found what simple phrase rules find and nothing more
+(for example the timeline field is the sentence about the brand team's approval time, not a launch date). The deal was in
+`replied`, not `meeting`, so the qualification gate did not run.
 
 ## Slack (the veto window, approvals, the digest)
 

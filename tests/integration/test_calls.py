@@ -341,3 +341,22 @@ def test_a_held_call_is_held_once_not_every_poll(conn, ro_conn, pack, clock):
     assert rig.orch.poll_calls() == [("call-none", "seen")] and rig.orch.poll_calls() == [("call-none", "seen")]
     assert len(audit(conn, "call.unmatched")) == 1
     assert conn.execute("SELECT count(*) FROM held_calls").fetchone()[0] == 1
+
+
+def test_a_person_can_assign_a_held_call_and_it_is_then_processed_once(conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock, email="sam.lee+one@brightside-optical.example")
+    other, _ = make_lead(conn, email="sam.lee+two@brightside-optical.example", name="Sam Two",
+                         company="Brightside Two", domain="brightside-two.example")
+    force_stage(conn, other, DealStage.MEETING)
+    rig.world.transcripts.add(call("call-amb", title="Intro call", participants=("sam.lee@brightside-optical.example",)))
+    assert rig.orch.poll_calls() == [("call-amb", "held")]
+    assert rig.orch.assign_held_call("call-amb", rig.deal_id, "owner") == "processed"
+    (row,) = audit(conn, "call.assigned", rig.deal_id)
+    assert row["transcript"] == "call-amb" and stage(conn) != "new"
+    assert conn.execute("SELECT stage FROM deals WHERE id = %s", (rig.deal_id,)).fetchone()[0] == "qualified"
+    assert conn.execute("SELECT resolved_at IS NOT NULL FROM held_calls").fetchone()[0]
+    with pytest.raises(LookupError):
+        rig.orch.assign_held_call("call-amb", rig.deal_id, "owner")                 # no longer held
+    assert rig.orch.poll_calls() == [("call-amb", "seen")]
+    with pytest.raises(LookupError):
+        rig.orch.assign_held_call("nope", rig.deal_id, "owner")

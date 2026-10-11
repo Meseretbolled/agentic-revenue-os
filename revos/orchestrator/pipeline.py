@@ -888,26 +888,46 @@ class Orchestrator:
                     "transcript": transcript_id, "title": transcript.title, "reason": match.kind,
                     "candidates": [str(c) for c in match.candidates]})
             return "held"
+        return self._process_call(match.deal_id, transcript, list(match.by))
+
+    def _process_call(self, deal_id: UUID, transcript: Any, by: list[str]) -> str:
+        transcript_id = transcript.id
         first = self.conn.execute(
             "INSERT INTO transcripts (deal_id, external_id, body) VALUES (%s, %s, %s) "
-            "ON CONFLICT (external_id) DO NOTHING RETURNING id", (match.deal_id, transcript_id,
+            "ON CONFLICT (external_id) DO NOTHING RETURNING id", (deal_id, transcript_id,
                                                                   transcript.text)).fetchone()
         if first is None:
             return "seen"
-        write_audit(self.conn, "orchestrator", "call.matched", match.deal_id, {
-            "transcript": transcript_id, "by": list(match.by)})
+        write_audit(self.conn, "orchestrator", "call.matched", deal_id, {
+            "transcript": transcript_id, "by": by})
         try:
-            result = self.handle_transcript(match.deal_id, transcript_id, transcript)
+            result = self.handle_transcript(deal_id, transcript_id, transcript)
             if result.status == "completed" and \
-                    DealStage(self._deal(match.deal_id)["stage"]) is DealStage.MEETING:
-                gate = self.run_qualification_gate(match.deal_id)      # criteria met: meeting -> qualified
-                write_audit(self.conn, "orchestrator", "call.qualification", match.deal_id, {
+                    DealStage(self._deal(deal_id)["stage"]) is DealStage.MEETING:
+                gate = self.run_qualification_gate(deal_id)            # criteria met: meeting -> qualified
+                write_audit(self.conn, "orchestrator", "call.qualification", deal_id, {
                     "transcript": transcript_id, "result": gate.status, "note": gate.reason,
                     "stage": gate.stage})
         except Exception:
             self.conn.execute("DELETE FROM transcripts WHERE id = %s", (first[0],))   # let the poll retry
             raise
         return "processed"
+
+    def assign_held_call(self, transcript_id: str, deal_id: UUID, actor: str) -> str:
+        """A person decides which deal a held call belongs to. Audited; the call is then processed
+        exactly as a matched one (and only once)."""
+        held = self.conn.execute("SELECT 1 FROM held_calls WHERE external_id = %s AND resolved_at IS NULL",
+                                 (transcript_id,)).fetchone()
+        if held is None:
+            raise LookupError(f"no held call {transcript_id}")
+        if self.transcripts is None or (transcript := self.transcripts.get(transcript_id)) is None:
+            raise LookupError(f"no transcript {transcript_id}")
+        self._deal(deal_id)                                                   # must exist
+        with self.conn.transaction():
+            self.conn.execute("UPDATE held_calls SET resolved_at = %s WHERE external_id = %s",
+                              (self.clock.now(), transcript_id))
+            write_audit(self.conn, actor, "call.assigned", deal_id, {"transcript": transcript_id})
+        return self._process_call(deal_id, transcript, ["operator"])
 
     def poll_calls(self) -> list[tuple[str, str]]:
         """Look for finished transcripts we have not handled. Idempotent per transcript id."""

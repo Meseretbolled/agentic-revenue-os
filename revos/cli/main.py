@@ -49,6 +49,50 @@ def demo() -> None:
     demo_main()
 
 
+calls_app = typer.Typer(help="Finished calls that could not be matched to one deal.")
+app.add_typer(calls_app, name="calls")
+
+
+@calls_app.command("list")
+def calls_list() -> None:
+    """Held calls: title, date, why, and the deals they could belong to."""
+    from revos.db import migrate
+    from revos.env import load_env_file
+    from revos.trace import held_calls
+    load_env_file()
+    with connect() as conn:
+        migrate(conn)
+        rows = held_calls(conn)
+    for row in rows:
+        ids = ", ".join(str(c)[:8] for c in row["candidate_deal_ids"]) or "-"
+        typer.echo(f"{row['external_id']}  {row['started_at']:%Y-%m-%d %H:%M}  {row['reason']:<9} "
+                   f"{row['title']!r}  candidates: {ids}")
+    if not rows:
+        typer.echo("no held calls")
+
+
+@calls_app.command("assign")
+def calls_assign(transcript_id: str, deal_id: str) -> None:
+    """Decide which deal a held call belongs to; it is then processed like a matched one."""
+    from uuid import UUID
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    load_env_file()
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        orch = build_orchestrator(conn, ro, SystemClock())
+        try:
+            outcome = orch.assign_held_call(transcript_id, UUID(deal_id), "operator")
+        except LookupError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+    typer.echo(f"{transcript_id}: {outcome} for deal {deal_id}")
+
+
 @app.command("call-demo")
 def call_demo() -> None:
     """Feed a scripted, fictional call through the same transcript port the real Fireflies adapter
