@@ -22,7 +22,7 @@ TOKEN = "correct-horse-battery-staple-for-tests"
 LOCAL = "http://localhost"
 TUNNEL = "https://some-name.trycloudflare.com"
 
-PAGES = ["/dashboard/", "/dashboard/pending", "/dashboard/activity", "/dashboard/queue", "/dashboard/lessons",
+PAGES = ["/dashboard/", "/dashboard/pipeline", "/dashboard/pending", "/dashboard/activity", "/dashboard/queue", "/dashboard/lessons",
          "/dashboard/integrations", "/dashboard/controls"]
 
 
@@ -84,7 +84,7 @@ def test_every_page_renders_when_signed_in(signed, demo, path):
 
 
 def test_the_board_has_a_card_per_deal_in_its_stage_column(signed, demo):
-    html = signed.get("/dashboard/").text
+    html = signed.get("/dashboard/pipeline").text
     for company in ("Northwind Optical (demo)", "Lakeside Dental Group (demo)", "Harbor Auto Care (demo)"):
         assert company in html
     assert "demo</span>" in html and 'href="/dashboard/deals/' in html
@@ -134,7 +134,7 @@ def test_a_superseded_write_cancelled_by_policy_is_not_listed_as_a_hard_block(si
 
 def test_queue_shows_depth_oldest_job_and_dead_letters_with_a_retry_button(signed, demo):
     html = signed.get("/dashboard/queue").text
-    assert "dead letters" in html and "demo dead letter" in html and "Retry" in html and "oldest waiting job" in html
+    assert "Dead letters" in html and "demo dead letter" in html and "Retry" in html and "Oldest waiting job" in html
 
 
 def test_lessons_show_evidence_and_the_drafts_that_cited_them(signed, demo):
@@ -146,7 +146,7 @@ def test_integrations_show_real_or_mock_and_model_spend_never_a_key(signed, demo
     html = signed.get("/dashboard/integrations").text
     for service in ("HubSpot", "Gmail", "Slack", "Fireflies", "Dropbox Sign", "LLM budget", "Tunnel URL"):
         assert service in html
-    assert "REAL" in html and "of <strong>$3.00</strong>" in html and "LLM_MAX_SPEND_USD" in html
+    assert "REAL" in html and "$3.00" in html and "LLM_MAX_SPEND_USD" in html
     assert "hs-secret-value-123" not in html
 
 
@@ -466,7 +466,7 @@ def test_the_kill_switch_set_in_the_dashboard_stops_a_send_and_turning_it_off_re
     rig, first = first_touch(conn, ro_conn, pack, clock)
     clock.advance(3600)
     signed.post("/dashboard/controls/kill", data={"csrf": token_for(signed), "on": "1"})
-    assert kill_switch_on(conn) and "KILL SWITCH ON" in signed.get("/dashboard/").text
+    assert kill_switch_on(conn) and "Kill switch is ON" in signed.get("/dashboard/").text
     assert rig.orch.send_action(first.action_id).status == "wait"
     assert rig.world.mailer.sent == []
     assert conn.execute("SELECT actor FROM audit_log WHERE event = 'system.kill_switch'").fetchone()[0] == "dashboard"

@@ -4,13 +4,13 @@
 <link rel="stylesheet" href="/dashboard/static/dashboard.css"></head>
 <body class="login">
 <form method="post" action="/dashboard/login" class="card login-card">
-  <div class="brand"><span class="dot"></span>Revenue OS</div>
+  <div class="brand"><span class="logo"></span><span class="brand-name">Revenue OS</span></div>
   <h1>Operator dashboard</h1>
-  {% if error %}<div class="flash err">That token is not right.</div>{% endif %}
+  {% if error %}<div class="flash err" role="alert">That token is not right.</div>{% endif %}
   <label for="token">Dashboard token</label>
   <input id="token" name="token" type="password" autocomplete="current-password" autofocus required>
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <button class="primary">Sign in</button>
-  <p class="muted">The token is the value of <code>DASHBOARD_TOKEN</code> in your local settings file.</p>
+  <button class="btn primary wide">Sign in</button>
+  <p class="muted small">The token is the value of <code>DASHBOARD_TOKEN</code> in your local settings file.</p>
 </form>
 </body></html>

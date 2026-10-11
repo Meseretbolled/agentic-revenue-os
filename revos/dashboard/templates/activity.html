@@ -1,22 +1,36 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Activity{% endblock %}
+{% block subtitle %}The newest events across all deals, in plain words.{% endblock %}
 {% block refresh %}0{% endblock %}
 {% block body %}
-<h1>Activity</h1>
 <form method="get" class="filters">
   <label>Actor <select name="actor"><option value="">all</option>
     {% for a in actors %}<option value="{{ a }}" {{ 'selected' if a == actor }}>{{ a }}</option>{% endfor %}</select></label>
   <label>Type <select name="event"><option value="">all</option>
     {% for e in events %}<option value="{{ e }}" {{ 'selected' if e == event }}>{{ e }}</option>{% endfor %}</select></label>
-  <button>Filter</button> {% if actor or event %}<a href="/dashboard/activity">clear</a>{% endif %}
+  <button class="btn">Filter</button> {% if actor or event %}<a href="/dashboard/activity">Clear</a>{% endif %}
 </form>
-<section class="card">
-<table class="t timeline"><thead><tr><th>When</th><th>Actor</th><th>Event</th><th>Deal</th><th>Detail</th></tr></thead><tbody>
-{% for r in rows %}
-  <tr><td class="time">{{ r.at|when }}</td><td><span class="chip">{{ r.actor }}</span></td><td>{{ r.event }}</td>
-      <td>{% if r.deal_id %}<a href="/dashboard/deals/{{ r.deal_id }}">{{ r.company or 'deal' }}</a>{% else %}-{% endif %}</td>
-      <td class="muted detail">{% for k, v in (r.detail or {}).items() %}{{ k }}={{ v|string|truncate(70) |mask }}{{ ' · ' if not loop.last }}{% endfor %}</td></tr>
-{% else %}<tr><td colspan="5" class="muted">No matching events.</td></tr>{% endfor %}
-</tbody></table>
+<section class="card flush">
+{% if not rows %}
+  <div class="empty-state">{{ icon("activity", 28) }}<strong>No matching events.</strong><span class="muted">Try clearing the filters.</span></div>
+{% else %}
+<ul class="feed">
+  {% for r in rows %}
+  <li>
+    <span class="chip actor-{{ r.kind }}">{{ 'system' if r.kind == 'system' else r.actor|mask }}</span>
+    <div class="feed-main">
+      <div>{{ r.sentence|mask }}{% if r.deal_id %} · <a href="/dashboard/deals/{{ r.deal_id }}">{{ r.company or 'deal' }}</a>{% endif %}</div>
+      <details class="raw"><summary>Details</summary>
+        <dl><dt>event</dt><dd>{{ r.event }}</dd><dt>actor</dt><dd>{{ r.actor }}</dd><dt>time</dt><dd class="num">{{ r.at|when }}</dd>
+        {% if r.deal_id %}<dt>deal</dt><dd>{{ r.deal_id }}</dd>{% endif %}</dl>
+        {% if r.detail %}<pre>{% for k, v in r.detail.items() %}{{ k }}={{ v|string|truncate(160)|mask }}
+{% endfor %}</pre>{% endif %}</details>
+    </div>
+    <span class="muted small nowrap" title="{{ r.at|when }}">{{ r.at|ago }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
 </section>
 {% endblock %}

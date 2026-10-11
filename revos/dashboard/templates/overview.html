@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Overview{% endblock %}
+{% block subtitle %}What is moving, what is waiting, and what needs a person.{% endblock %}
+{% block body %}
+<section class="kpis" aria-label="Key numbers">
+  <a class="kpi" href="/dashboard/pipeline">
+    <span class="kpi-label">Live deals</span>
+    <span class="kpi-value">{{ o.live }}</span>
+    <span class="kpi-sub">in an open stage</span>
+  </a>
+  <a class="kpi {{ 'kpi-attn' if o.needs_count }}" href="#needs">
+    <span class="kpi-label">Awaiting you</span>
+    <span class="kpi-value">{{ o.needs_count }}</span>
+    <span class="kpi-sub">{{ 'approvals, replies, dead letters, stalls' if o.needs_count else 'nothing needs you' }}</span>
+  </a>
+  <a class="kpi" href="/dashboard/pending">
+    <span class="kpi-label">Sends in veto window</span>
+    <span class="kpi-value">{{ o.veto }}</span>
+    <span class="kpi-sub">cancellable now</span>
+  </a>
+  <a class="kpi" href="/dashboard/activity">
+    <span class="kpi-label">System vs human</span>
+    <span class="kpi-value">{{ o.system }}<span class="kpi-slash"> / </span>{{ o.human }}</span>
+    <span class="kpi-sub">actions in the last 24 hours</span>
+  </a>
+  <a class="kpi" href="/dashboard/integrations">
+    <span class="kpi-label">Model spend</span>
+    <span class="kpi-value">${{ '%.2f'|format(o.spend.usd) }}<span class="kpi-slash"> / ${{ '%.2f'|format(o.cap) }}</span></span>
+    <progress class="meter" value="{{ o.spend_pct }}" max="100">{{ o.spend_pct }}%</progress>
+  </a>
+</section>
+
+<div class="split">
+  <section class="card" aria-labelledby="funnel-h">
+    <h2 id="funnel-h">Pipeline funnel</h2>
+    <p class="muted small">Deals now in each stage.</p>
+    <svg class="funnel" viewBox="0 0 520 {{ 12 + o.funnel|length * 28 }}" role="img" aria-label="Deals per stage">
+      {% for f in o.funnel %}
+        <g transform="translate(0 {{ 6 + loop.index0 * 28 }})">
+          <text class="svg-label" x="0" y="14">{{ f.label }}</text>
+          <rect class="svg-track" x="130" y="2" width="340" height="16" rx="4"/>
+          {% if f.n %}<rect class="svg-bar" x="130" y="2" width="{{ [f.pct * 3.4, 6]|max }}" height="16" rx="4"/>{% endif %}
+          <text class="svg-num" x="516" y="14">{{ f.n }}</text>
+        </g>
+      {% endfor %}
+    </svg>
+  </section>
+
+  <section class="card" aria-labelledby="hour-h">
+    <h2 id="hour-h">Activity per hour</h2>
+    <p class="muted small">Recorded events over the last 24 hours (peak {{ o.peak }}).</p>
+    <svg class="hours" viewBox="0 0 480 96" role="img" aria-label="Events per hour">
+      {% for b in o.buckets %}
+        <rect class="svg-bar{{ ' svg-bar-zero' if not b.n }}" x="{{ loop.index0 * 20 + 2 }}" y="{{ 72 - ([b.pct * 0.7, 2]|max) }}"
+              width="16" height="{{ [b.pct * 0.7, 2]|max }}" rx="2"><title>{{ b.hour.strftime('%H:00') }}: {{ b.n }} event(s)</title></rect>
+      {% endfor %}
+      <text class="svg-axis" x="2" y="92">{{ o.buckets[0].hour.strftime('%H:00') }}</text>
+      <text class="svg-axis" x="240" y="92" text-anchor="middle">{{ o.buckets[12].hour.strftime('%H:00') }}</text>
+      <text class="svg-axis" x="478" y="92" text-anchor="end">{{ o.buckets[-1].hour.strftime('%H:00') }}</text>
+    </svg>
+  </section>
+</div>
+
+<section class="card" id="needs" aria-labelledby="needs-h">
+  <h2 id="needs-h">Needs you <span class="count">{{ o.needs_count }}</span></h2>
+  {% if not o.needs_count %}
+    <div class="empty-state">{{ icon("check", 28) }}<strong>Nothing needs you.</strong>
+      <span class="muted">No approvals, held replies, unacknowledged dead letters or stalled deals.</span></div>
+  {% else %}
+  <ul class="needs">
+    {% for a in o.approvals %}
+      <li>{{ icon("pending") }}<div><strong>Approve {{ a.type|pretty }}</strong> for <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'a deal' }}</a></div><a class="btn sm" href="/dashboard/pending">Review</a></li>
+    {% endfor %}
+    {% for h in o.held %}
+      <li>{{ icon("inbox") }}<div><strong>Held reply:</strong> {{ (h.subject or 'no subject')|mask|truncate(60) }} <span class="muted">({{ h.reason|pretty }}, {{ h.received_at|ago }})</span></div></li>
+    {% endfor %}
+    {% for h in o.held_calls %}
+      <li>{{ icon("inbox") }}<div><strong>Held call:</strong> {{ (h.title or 'untitled')|truncate(60) }} <span class="muted">({{ h.reason|pretty }})</span></div></li>
+    {% endfor %}
+    {% if o.dead %}
+      <li>{{ icon("alert") }}<div><strong>{{ o.dead }} dead letter{{ 's' if o.dead != 1 }}</strong> not acknowledged</div><a class="btn sm" href="/dashboard/queue">Open queue</a></li>
+    {% endif %}
+    {% for s in o.stalled %}
+      <li>{{ icon("flag") }}<div><strong>Stalled:</strong> <a href="/dashboard/deals/{{ s.id }}">{{ s.company or 'a deal' }}</a> <span class="muted">in {{ s.stage|stage }}, nothing recorded for {{ o.stalled_hours }}h+ (last {{ s.last|ago }})</span></div></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

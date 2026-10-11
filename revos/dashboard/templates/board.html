@@ -1,24 +1,38 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Pipeline{% endblock %}
+{% block subtitle %}Every deal by stage. Empty stages are folded away.{% endblock %}
 {% block body %}
-<h1>Pipeline</h1>
+{% set filled = [] %}{% set empty = [] %}
+{% for stage in stages %}{% if columns[stage] %}{% set _ = filled.append(stage) %}{% else %}{% set _ = empty.append(stage) %}{% endif %}{% endfor %}
+{% if not filled %}
+  <section class="card"><div class="empty-state">{{ icon("pipeline", 28) }}<strong>No deals yet.</strong>
+    <span class="muted">Seed a lead with <code>revos seed</code> or run <code>revos dashboard-seed</code> for demo data.</span></div></section>
+{% endif %}
 <div class="board">
-{% for stage in stages %}
-  <section class="col{{ ' is-empty' if not columns[stage] }}">
-    <h2>{{ stage.replace('_', ' ') }} <span class="count">{{ columns[stage]|length }}</span></h2>
-    {% for c in columns[stage] %}
+{% for stage in filled %}
+  <section class="col" aria-label="{{ stage|stage }}">
+    <h2>{{ stage|stage }} <span class="count">{{ columns[stage]|length }}</span></h2>
+    {% for c in columns[stage][:8] %}
       <a class="deal" href="/dashboard/deals/{{ c.id }}">
-        <div class="deal-top"><strong>{{ c.company }}</strong>{% if c.demo %}<span class="chip demo">demo</span>{% endif %}</div>
+        <div class="deal-top"><strong>{{ c.company }}</strong>{% if c.demo %}<span class="chip tone-warn">demo</span>{% endif %}</div>
         <div class="deal-meta">
           {% if c.tier %}<span class="tier t{{ c.tier }}">{{ c.tier }}</span>{% endif %}
-          {% if c.score is not none %}<span>{{ c.score }}/100</span>{% endif %}
-          <span class="muted">· {{ c.age }}</span>
+          {% if c.score is not none %}<span class="num">{{ c.score }}<span class="muted">/100</span></span>{% endif %}
+          <span class="muted num">{{ c.age }}</span>
         </div>
         <div class="muted small">Owner: {{ c.owner }}</div>
-        <div class="next">{{ c.next }}</div>
+        <div class="next">{{ icon("stage", 14) }}<span>{{ c.next }}</span></div>
       </a>
-    {% else %}<div class="empty">none</div>{% endfor %}
+    {% endfor %}
+    {% if columns[stage]|length > 8 %}<p class="muted small more">+{{ columns[stage]|length - 8 }} more in this stage</p>{% endif %}
   </section>
 {% endfor %}
+{% if empty and filled %}
+  <aside class="col col-folded" aria-label="Empty stages">
+    <h2>Empty stages <span class="count">{{ empty|length }}</span></h2>
+    <ul class="folded">{% for stage in empty %}<li>{{ stage|stage }}</li>{% endfor %}</ul>
+  </aside>
+{% endif %}
 </div>
 {% endblock %}

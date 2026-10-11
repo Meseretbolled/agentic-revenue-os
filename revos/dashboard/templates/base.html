@@ -1,36 +1,56 @@
-<!doctype html>
+{% from "_icons.html" import icon %}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="server-now" content="{{ now.isoformat() if now else '' }}">
-<title>{% block title %}Revenue OS{% endblock %} · Revenue OS</title>
+<title>{{ self.title() }} · Revenue OS</title>
 <link rel="stylesheet" href="/dashboard/static/dashboard.css">
 </head>
 <body data-refresh="{% block refresh %}5{% endblock %}">
-<header class="top">
-  <div class="brand"><span class="dot"></span>Revenue OS</div>
-  <nav>
-    {% set items = [("board","/dashboard/","Pipeline"),("pending","/dashboard/pending","Pending"),
-                    ("activity","/dashboard/activity","Activity"),("queue","/dashboard/queue","Queue"),
-                    ("lessons","/dashboard/lessons","Lessons"),("integrations","/dashboard/integrations","Integrations"),
-                    ("controls","/dashboard/controls","Controls")] %}
-    {% for key, href, label in items %}
-      <a href="{{ href }}" class="{{ 'on' if active == key else '' }}">{{ label }}
-        {% if key == 'pending' and waiting %}<span class="badge">{{ waiting }}</span>{% endif %}</a>
-    {% endfor %}
-  </nav>
-  <form method="post" action="/dashboard/logout" class="logout">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Sign out</button>
-  </form>
-</header>
-{% if kill %}<div class="banner danger">KILL SWITCH ON: nothing is being sent. <a href="/dashboard/controls">Controls</a></div>{% endif %}
-<main id="content">
-  {% if msg %}<div class="flash {{ 'ok' if msg_ok else 'err' }}">{{ msg }}</div>{% endif %}
-  {% block body %}{% endblock %}
-</main>
-<footer>Everything here comes from the live database. Email addresses are masked. <span id="refreshed"></span></footer>
+<a class="skip" href="#content">Skip to content</a>
+<div class="app">
+  <aside class="sidebar" aria-label="Main">
+    <div class="brand"><span class="logo"></span><span class="brand-name">Revenue OS</span></div>
+    <nav>
+      {% set items = [("overview","/dashboard/","Overview"),("board","/dashboard/pipeline","Pipeline"),
+                      ("pending","/dashboard/pending","Pending"),("activity","/dashboard/activity","Activity"),
+                      ("queue","/dashboard/queue","Queue"),("lessons","/dashboard/lessons","Lessons"),
+                      ("integrations","/dashboard/integrations","Integrations"),
+                      ("controls","/dashboard/controls","Controls")] %}
+      {% for key, href, label in items %}
+        <a href="{{ href }}" class="nav-item{{ ' on' if active == key }}" {% if active == key %}aria-current="page"{% endif %}>
+          {{ icon({"board": "pipeline"}.get(key, key)) }}<span class="nav-label">{{ label }}</span>
+          {% if key == 'pending' and waiting %}<span class="badge" title="{{ waiting }} waiting">{{ waiting }}</span>{% endif %}
+        </a>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      {% if kill %}<a class="kill-on" href="/dashboard/controls">Kill switch ON</a>{% endif %}
+      <form method="post" action="/dashboard/logout">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="nav-item plain">{{ icon("logout") }}<span class="nav-label">Sign out</span></button>
+      </form>
+    </div>
+  </aside>
+  <div class="main">
+    <header class="page-head">
+      <div>
+        <h1>{% block title %}Revenue OS{% endblock %}</h1>
+        <p class="sub">{% block subtitle %}{% endblock %}</p>
+      </div>
+      <div class="updated" title="The page refreshes itself every few seconds">
+        <span class="pulse" id="pulse"></span><span id="updated-text">Updated just now</span>
+      </div>
+    </header>
+    {% if kill %}<div class="banner danger" role="status">Kill switch is ON: nothing is being sent. <a href="/dashboard/controls">Open controls</a></div>{% endif %}
+    <main id="content" tabindex="-1">
+      {% if msg %}<div class="flash {{ 'ok' if msg_ok else 'err' }}" role="status">{{ msg }}</div>{% endif %}
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+</div>
 <script src="/dashboard/static/dashboard.js"></script>
 </body>
 </html>

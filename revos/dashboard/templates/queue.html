@@ -1,20 +1,43 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Queue{% endblock %}
+{% block subtitle %}Background work and the jobs that failed for good.{% endblock %}
 {% block body %}
-<h1>Queue and dead letters</h1>
-<div class="stats">
-  <div class="stat"><div class="n">{{ q.queued }}</div><div class="l">queued</div></div>
-  <div class="stat"><div class="n">{{ q.running }}</div><div class="l">running</div></div>
-  <div class="stat"><div class="n">{{ q.oldest }}</div><div class="l">oldest waiting job</div></div>
-  <div class="stat {{ 'bad' if q.dead }}"><div class="n">{{ q.dead|length }}</div><div class="l">dead letters</div></div>
-</div>
-{% if q.by_type %}<p class="muted">Queued by type: {% for t in q.by_type %}{{ t.type }} ({{ t.n }}){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
-<section class="card"><h2>Dead letters</h2>
-  <p class="muted">Jobs that failed for good. A retry gives the job a fresh attempt budget and is recorded in the audit log.</p>
+<section class="kpis four" aria-label="Queue health">
+  <div class="kpi"><span class="kpi-label">Queued</span><span class="kpi-value">{{ q.queued }}</span><span class="kpi-sub">waiting to run</span></div>
+  <div class="kpi"><span class="kpi-label">Running</span><span class="kpi-value">{{ q.running }}</span><span class="kpi-sub">in a worker now</span></div>
+  <div class="kpi"><span class="kpi-label">Oldest waiting job</span><span class="kpi-value small">{{ q.oldest }}</span><span class="kpi-sub">due and not started</span></div>
+  <div class="kpi {{ 'kpi-attn' if q.dead }}"><span class="kpi-label">Dead letters</span><span class="kpi-value">{{ q.dead|length }}</span><span class="kpi-sub">not acknowledged</span></div>
+</section>
+{% if q.by_type %}<p class="muted small">Queued by type: {% for t in q.by_type %}{{ t.type }} ({{ t.n }}){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+
+<section class="card"><div class="head"><h2>Dead letters <span class="count">{{ q.dead|length }}</span></h2>
+  {% if q.dead %}
+  <form method="post" action="/dashboard/queue/ack-older" class="inline" data-confirm="Acknowledge every dead letter older than the hours you entered?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="inline small muted" for="hours">Acknowledge all older than</label>
+    <input id="hours" name="hours" type="number" min="1" max="8760" value="24" class="narrow"> <span class="muted small">hours</span>
+    <button class="btn">Acknowledge</button>
+  </form>{% endif %}</div>
+  <p class="muted small">Jobs that failed for good. Retry gives a job a fresh attempt budget; Acknowledge means a person has seen it. Both are recorded in the audit log.</p>
+  {% if not q.dead %}
+    <div class="empty-state small">{{ icon("check", 22) }}<span class="muted">No unacknowledged dead letters.</span></div>
+  {% else %}
   <table class="t"><thead><tr><th>#</th><th>Job</th><th>Error</th><th>When</th><th></th></tr></thead><tbody>
-  {% for d in q.dead %}<tr><td>{{ d.id }}</td><td>{{ d.type }} <span class="muted">(job {{ d.job_id }})</span></td><td class="err-text">{{ (d.error or '')|mask|truncate(160) }}</td><td class="time">{{ d.created_at|when }}</td>
-    <td><form method="post" action="/dashboard/queue/{{ d.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Retry</button></form></td></tr>
-  {% else %}<tr><td colspan="5" class="muted">No dead letters.</td></tr>{% endfor %}
+  {% for d in q.dead %}<tr><td class="num">{{ d.id }}</td><td>{{ d.type }} <span class="muted">(job {{ d.job_id }})</span></td><td class="err-text">{{ (d.error or '')|mask|truncate(160) }}</td><td class="nowrap" title="{{ d.created_at|when }}">{{ d.created_at|ago }}</td>
+    <td class="actions"><form method="post" action="/dashboard/queue/{{ d.id }}/retry"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn">Retry</button></form>
+      <form method="post" action="/dashboard/queue/{{ d.id }}/ack"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn">Acknowledge</button></form></td></tr>
+  {% endfor %}
   </tbody></table>
+  {% endif %}
+</section>
+
+<section class="card"><h2>Acknowledged <span class="count">{{ q.acked|length }}</span></h2>
+  <p class="muted small">Seen by a person and kept for the record. They no longer count as needing attention.</p>
+  {% if not q.acked %}<div class="empty-state small">{{ icon("book", 22) }}<span class="muted">Nothing acknowledged yet.</span></div>
+  {% else %}
+  <table class="t"><thead><tr><th>#</th><th>Job</th><th>Error</th><th>Acknowledged</th></tr></thead><tbody>
+  {% for d in q.acked %}<tr><td class="num">{{ d.id }}</td><td>{{ d.type }}</td><td class="err-text">{{ (d.error or '')|mask|truncate(120) }}</td><td class="nowrap">{{ d.acknowledged_at|ago }} <span class="muted">by {{ d.acknowledged_by }}</span></td></tr>{% endfor %}
+  </tbody></table>{% endif %}
 </section>
 {% endblock %}

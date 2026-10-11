@@ -1,19 +1,19 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Lessons{% endblock %}
+{% block subtitle %}What the system learned, the words it rests on, and which drafts cited it.{% endblock %}
 {% block body %}
-<h1>Lessons</h1>
-<p class="muted">What the system learned from calls and replies, the words it rests on, and which drafts cited it.</p>
 {% for l in lessons %}
 <section class="card {{ 'retired' if l.retired_at }}">
-  <div class="head"><h2>L{{ l.id }} {% if l.retired_at %}<span class="chip warn">retired</span>{% endif %}</h2>
-    <div class="muted small">source {{ l.source }} · confidence {{ l.confidence }} · uses {{ l.uses }} · wins {{ l.wins }} · losses {{ l.losses }}</div></div>
+  <div class="head"><h2>L{{ l.id }} {% if l.retired_at %}<span class="chip tone-warn">retired</span>{% endif %}</h2>
+    <div class="muted small num">source {{ l.source }} · confidence {{ l.confidence }} · uses {{ l.uses }} · wins {{ l.wins }} · losses {{ l.losses }}</div></div>
   <p>{{ l.text|mask }}</p>
   <p class="quote">Evidence: “{{ l.evidence|mask }}”</p>
   {% if l.tags %}<p>{% for t in l.tags %}<span class="chip">{{ t }}</span> {% endfor %}</p>{% endif %}
   {% if l.retired_reason %}<p class="muted">Retired: {{ l.retired_reason }}</p>{% endif %}
   {% if l.cited_by %}<table class="t"><thead><tr><th>Cited by</th><th>Deal</th><th>Outcome</th><th>When</th></tr></thead><tbody>
-    {% for u in l.cited_by %}<tr><td>{{ (u.type or 'action').replace('_', ' ') }}</td><td>{% if u.deal_id %}<a href="/dashboard/deals/{{ u.deal_id }}">{{ u.company or 'deal' }}</a>{% endif %}</td><td>{{ u.outcome }}</td><td class="time">{{ u.used_at|when }}</td></tr>{% endfor %}
+    {% for u in l.cited_by %}<tr><td>{{ (u.type or 'action').replace('_', ' ') }}</td><td>{% if u.deal_id %}<a href="/dashboard/deals/{{ u.deal_id }}">{{ u.company or 'deal' }}</a>{% endif %}</td><td>{{ u.outcome }}</td><td class="nowrap">{{ u.used_at|ago }}</td></tr>{% endfor %}
   </tbody></table>{% else %}<p class="muted">Not cited by any draft yet.</p>{% endif %}
 </section>
-{% else %}<section class="card"><p class="muted">No lessons yet.</p></section>{% endfor %}
+{% else %}<section class="card"><div class="empty-state">{{ icon("book", 28) }}<strong>No lessons yet.</strong><span class="muted">Lessons appear after a call or a reply teaches the system something.</span></div></section>{% endfor %}
 {% endblock %}

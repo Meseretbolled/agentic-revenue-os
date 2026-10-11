@@ -49,8 +49,11 @@ def cancel_send(conn: psycopg.Connection, clock: Clock, action_id: UUID) -> Resu
 
 
 def decide(conn: psycopg.Connection, clock: Clock, action_id: UUID, approve: bool) -> Result:
-    row = conn.cursor(row_factory=dict_row).execute(
-        "SELECT status, decision_by FROM actions WHERE id = %s", (action_id,)).fetchone()
+    row = (
+        conn.cursor(row_factory=dict_row)
+        .execute("SELECT status, decision_by FROM actions WHERE id = %s", (action_id,))
+        .fetchone()
+    )
     if row is None:
         return Result(False, "That action no longer exists.")
     if row["status"] == "cancelled" and row["decision_by"] == "policy":
@@ -58,14 +61,25 @@ def decide(conn: psycopg.Connection, clock: Clock, action_id: UUID, approve: boo
     if row["status"] != "awaiting_approval":
         return Result(False, f"Nothing to decide: the action is {row['status']}.")
     try:
-        decide_by_human(conn, clock, action_id, ACTOR, approve, "approved in the dashboard" if approve
-                        else "rejected in the dashboard")
+        decide_by_human(
+            conn,
+            clock,
+            action_id,
+            ACTOR,
+            approve,
+            "approved in the dashboard" if approve else "rejected in the dashboard",
+        )
     except ValueError:
         return Result(False, "Someone else already decided this.")
-    if approve:                       # the send step re-reads the approval from the database before it sends
+    if approve:  # the send step re-reads the approval from the database before it sends
         record_event(conn, f"approved-send:{action_id}", "action.send", {"action_id": str(action_id)}, clock)
-    record_event(conn, f"slack:{action_id}:{'approve' if approve else 'reject'}", "slack.sync",
-                 {"action_id": str(action_id)}, clock)
+    record_event(
+        conn,
+        f"slack:{action_id}:{'approve' if approve else 'reject'}",
+        "slack.sync",
+        {"action_id": str(action_id)},
+        clock,
+    )
     return Result(True, "Approved. It is queued to send." if approve else "Rejected. It will not be sent.")
 
 
@@ -99,5 +113,51 @@ def set_veto(conn: psycopg.Connection, raw: str) -> Result:
         set_veto_window(conn, None if raw == "" else int(raw), ACTOR)
     except ValueError as exc:
         return Result(False, str(exc) if "veto window" in str(exc) else "Enter a whole number of seconds.")
-    return Result(True, "Veto window override cleared: the environment decides again." if raw == ""
-                  else f"Veto window is now {int(raw)} seconds for new actions.")
+    return Result(
+        True,
+        "Veto window override cleared: the environment decides again."
+        if raw == ""
+        else f"Veto window is now {int(raw)} seconds for new actions.",
+    )
+
+
+def acknowledge_dead_letter(conn: psycopg.Connection, clock: Clock, dead_letter_id: int) -> Result:
+    """Mark a dead letter as seen by a person: it stops counting as needing attention, and stays on record."""
+    with conn.transaction():
+        row = conn.execute(
+            "UPDATE dead_letters SET acknowledged_at = %s, acknowledged_by = %s "
+            "WHERE id = %s AND acknowledged_at IS NULL AND retried_at IS NULL RETURNING job_id, type",
+            (clock.now(), ACTOR, dead_letter_id),
+        ).fetchone()
+        if row is None:
+            return Result(False, "That dead letter is already acknowledged, retried or gone.")
+        write_audit(
+            conn,
+            ACTOR,
+            "job.acknowledged",
+            None,
+            {"dead_letter_id": dead_letter_id, "job_id": row[0], "type": row[1]},
+        )
+    return Result(True, f"Dead letter {dead_letter_id} acknowledged. It stays under Acknowledged.")
+
+
+def acknowledge_older_than(conn: psycopg.Connection, clock: Clock, hours: int) -> Result:
+    """Acknowledge every unacknowledged, unretried dead letter older than `hours` hours (one audit row)."""
+    if not 1 <= hours <= 24 * 365:
+        return Result(False, "Enter a number of hours from 1 to 8760.")
+    with conn.transaction():
+        rows = conn.execute(
+            "UPDATE dead_letters SET acknowledged_at = %s, acknowledged_by = %s "
+            "WHERE acknowledged_at IS NULL "
+            "AND retried_at IS NULL AND created_at < %s - make_interval(hours => %s) RETURNING id",
+            (clock.now(), ACTOR, clock.now(), hours),
+        ).fetchall()
+        if rows:
+            write_audit(
+                conn,
+                ACTOR,
+                "job.acknowledged_many",
+                None,
+                {"older_than_hours": hours, "dead_letter_ids": sorted(r[0] for r in rows)},
+            )
+    return Result(True, f"{len(rows)} dead letter(s) older than {hours}h acknowledged.")

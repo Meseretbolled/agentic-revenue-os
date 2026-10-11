@@ -1,18 +1,24 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Integrations{% endblock %}
+{% block subtitle %}REAL means the live service is used. MOCK is an offline stand-in. Keys are never shown.{% endblock %}
 {% block body %}
-<h1>Integrations</h1>
-<p class="muted">REAL means the live service is used (a key is present). MOCK means an offline stand-in. Keys are never shown.
-  {% if checking %}<strong>Checking the services now…</strong>{% endif %}</p>
-<section class="card"><table class="t"><thead><tr><th>Service</th><th>Mode</th><th>Health</th><th>Notes</th></tr></thead><tbody>
-{% for r in rows %}<tr><td><strong>{{ r.service }}</strong></td>
-  <td><span class="chip {{ 'real' if r.mode == 'REAL' else 'mock' }}">{{ r.mode }}</span></td>
-  <td>{% if r.status %}<span class="chip {{ 'auto' if 'OK' in r.status else 'warn' if 'MOCK' in r.status else 'bad' }}">{{ r.status }}</span> <span class="muted small">{{ r.detail|mask }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
-  <td class="muted">{{ r.why }}{% if not r.built %} · adapter not built yet{% endif %}</td></tr>{% endfor %}
-</tbody></table></section>
+<section class="card flush">
+  <div class="card-head"><h2>Services</h2>
+    <span class="muted small">{% if checking %}Checking the services now…{% elif checked_ago %}Last checked {{ checked_ago }}{% else %}Not checked live{% endif %}</span></div>
+  <table class="t"><thead><tr><th>Service</th><th>Mode</th><th>State</th><th>Notes</th></tr></thead><tbody>
+  {% for r in rows %}
+    <tr><td><strong>{{ r.service }}</strong></td>
+      <td><span class="chip {{ 'tone-ok' if r.mode == 'REAL' and r.state != 'Not used' else '' }}">{{ r.mode }}</span></td>
+      <td>{% if r.tone == 'loading' %}<span class="skeleton sk-chip" role="status" aria-label="Checking"></span>
+          {% else %}<span class="chip tone-{{ r.tone }}">{{ r.state }}</span>{% endif %}</td>
+      <td class="muted">{{ r.note|mask }}{% if r.detail and r.tone == 'bad' %} {{ r.detail|mask }}{% endif %}</td></tr>
+  {% endfor %}
+  </tbody></table>
+</section>
 
 <section class="card"><h2>Model spend</h2>
-  <p><strong>${{ '%.4f'|format(spend.usd) }}</strong> of <strong>${{ '%.2f'|format(cap) }}</strong> (LLM_MAX_SPEND_USD)
+  <p><strong class="num">${{ '%.4f'|format(spend.usd) }}</strong> of <strong class="num">${{ '%.2f'|format(cap) }}</strong> (LLM_MAX_SPEND_USD)
      · {{ spend.calls }} calls · {{ '{:,}'.format(spend.tokens_in) }} tokens in / {{ '{:,}'.format(spend.tokens_out) }} out</p>
   <progress class="meter" value="{{ pct }}" max="100">{{ pct }}%</progress>
 </section>

@@ -1,19 +1,19 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}Pending{% endblock %}
+{% block subtitle %}Sends counting down, items waiting for a decision, and what policy stopped.{% endblock %}
 {% block body %}
-<h1>Pending</h1>
-
 <section class="card"><h2>In the veto window <span class="count">{{ veto|length }}</span></h2>
-  <p class="muted">These send by themselves when the timer ends. Cancel stops them.</p>
+  <p class="muted small">These send by themselves when the timer ends. Cancel stops them.</p>
   {% for a in veto %}
   <div class="row">
     <div><strong>{{ a.type.replace('_', ' ') }}</strong> · <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'deal' }}</a>
       <div class="muted small">{{ a.subject }}</div></div>
     <div class="right"><span class="countdown big" data-until="{{ a.veto_until.isoformat() }}"></span>
       <form method="post" action="/dashboard/actions/{{ a.id }}/cancel">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Cancel send</button></form></div>
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn danger">Cancel send</button></form></div>
   </div>
-  {% else %}<p class="muted">Nothing is counting down.</p>{% endfor %}
+  {% else %}<div class="empty-state small">{{ icon("pending", 22) }}<span class="muted">Nothing is counting down.</span></div>{% endfor %}
 </section>
 
 <section class="card"><h2>Waiting for approval <span class="count">{{ approval|length }}</span></h2>
@@ -22,21 +22,34 @@
     <div><strong>{{ a.type.replace('_', ' ') }}</strong> · <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'deal' }}</a>
       <div class="muted small">{{ a.subject }}</div></div>
     <div class="right inline">
-      <form method="post" action="/dashboard/actions/{{ a.id }}/approve"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="primary">Approve</button></form>
-      <form method="post" action="/dashboard/actions/{{ a.id }}/reject"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Reject</button></form>
+      <form method="post" action="/dashboard/actions/{{ a.id }}/approve"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn primary">Approve</button></form>
+      <form method="post" action="/dashboard/actions/{{ a.id }}/reject"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn">Reject</button></form>
     </div>
   </div>
-  {% else %}<p class="muted">Nothing needs a decision.</p>{% endfor %}
+  {% else %}<div class="empty-state small">{{ icon("check", 22) }}<span class="muted">Nothing needs a decision.</span></div>{% endfor %}
 </section>
 
 <section class="card"><h2>Blocked by policy <span class="count">{{ blocked|length }}</span></h2>
-  <p class="muted">Hard blocks never send and have no button: no one can approve them from here.</p>
+  <p class="muted small">Hard blocks never send and have no button: no one can approve them from here.</p>
   {% for a in blocked %}
   <div class="row">
     <div><strong>{{ a.type.replace('_', ' ') }}</strong> · <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'deal' }}</a>
       <div class="muted small">{{ a.subject }}</div></div>
-    <div class="right"><span class="chip warn">blocked</span> <span class="muted small">{{ a.why or 'policy' }}</span></div>
+    <div class="right"><span class="chip tone-bad">blocked</span> <span class="muted small">{{ a.why or 'policy' }}</span></div>
   </div>
-  {% else %}<p class="muted">Nothing blocked recently.</p>{% endfor %}
+  {% else %}<div class="empty-state small">{{ icon("shield", 22) }}<span class="muted">Nothing is blocked right now.</span></div>{% endfor %}
 </section>
+
+{% if superseded %}
+<section class="card muted-card"><h2>Superseded <span class="count">{{ superseded|length }}</span></h2>
+  <p class="muted small">These were blocked, then replaced by a later attempt on the same deal. They are history, not live blocks.</p>
+  {% for a in superseded %}
+  <div class="row">
+    <div>{{ a.type.replace('_', ' ') }} · <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'deal' }}</a>
+      <div class="muted small">{{ a.subject }}</div></div>
+    <div class="right"><span class="chip">superseded</span> <span class="muted small">{{ a.why or 'policy' }}</span></div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
 {% endblock %}
