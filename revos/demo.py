@@ -24,11 +24,12 @@ from revos.db import connect_read_only, database_url, migrate
 from revos.orchestrator.pipeline import Orchestrator
 from revos.ports.mail import InboundEmail
 from revos.runtime.worker import Worker
+from revos.seed import demo_address
 from revos.segments import load_all
 from revos.skills.slots import slot_text
 
 ROOT = Path(__file__).resolve().parent.parent
-CONTACT = "sam.lee@brightside-optical.example"
+CONTACT = demo_address("brightside")      # a plus-address of the prospect inbox, never .example
 DEMO_DB = "revos_demo"
 START = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)          # a Monday, 09:00 UTC
 

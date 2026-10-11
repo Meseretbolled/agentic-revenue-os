@@ -22,6 +22,7 @@ class Job:
     attempts: int          # includes this run; also the fencing token for complete/fail
     max_attempts: int
     event_id: int | None
+    correlation_id: str | None = None
 
 
 def backoff_seconds(attempt: int, rng: random.Random) -> float:
@@ -67,7 +68,7 @@ def claim_job(conn: psycopg.Connection, clock: Clock, lease_seconds: float = 60)
                 (attempts, now, lease_seconds, row["id"]),
             )
             return Job(row["id"], row["type"], row["payload"], attempts, row["max_attempts"],
-                       row["event_id"])
+                       row["event_id"], row.get("correlation_id"))
 
 
 def complete_job(conn: psycopg.Connection, job: Job, clock: Clock) -> bool:
@@ -113,6 +114,16 @@ def fail_job(
             (error, run_at, job.id),
         )
         return "retry"
+
+
+def release_job(conn: psycopg.Connection, job: Job) -> bool:
+    """Give a running job back to the queue untouched (a clean shutdown that could not wait for it).
+    The attempt it used is returned, so being interrupted never counts against its retry budget.
+    False if the lease had already moved on."""
+    with conn.transaction():
+        return bool(conn.execute(
+            "UPDATE jobs SET status = 'queued', lease_until = NULL, attempts = attempts - 1 "
+            "WHERE id = %s AND status = 'running' AND attempts = %s", (job.id, job.attempts)).rowcount)
 
 
 def list_dead_letters(conn: psycopg.Connection) -> list[dict[str, Any]]:

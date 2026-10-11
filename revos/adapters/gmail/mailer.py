@@ -12,6 +12,7 @@ from typing import Any
 
 from revos.adapters.gmail.mime import build_message, key_token, message_ids
 from revos.adapters.gmail.transport import SENT, Mailbox, MailRejected, SmtpTransport
+from revos.policy.recipients import recipient_allowed
 from revos.ports.mail import OutboundEmail, build_ics, message_id_for
 
 _MAIL_TYPES = {"first_touch", "follow_up"}
@@ -30,12 +31,13 @@ def plus_address(address: str, tag: str | None) -> str | None:
 class GmailMailer:
     def __init__(self, address: str, *, smtp: SmtpTransport, mailbox: Mailbox,
                  allowlist: frozenset[str] | None, required_footer: Sequence[str],
-                 sender_name: str | None = None) -> None:
+                 sender_name: str | None = None, plus_bases: frozenset[str] = frozenset()) -> None:
         if not all(s.strip() for s in required_footer):
             raise ValueError("the unsubscribe line and postal address are both required for real email")
         self._address = address
         self._smtp, self._mailbox = smtp, mailbox
         self._allow = None if allowlist is None else frozenset(a.strip().lower() for a in allowlist)
+        self._plus_bases = frozenset(b.strip().lower() for b in plus_bases)
         self._footer = tuple(required_footer)
         self._sender_name = sender_name
 
@@ -44,7 +46,7 @@ class GmailMailer:
 
     def send(self, email: OutboundEmail) -> str:
         to = email.to.strip().lower()
-        if self._allow is not None and to not in self._allow:
+        if self._allow is not None and not recipient_allowed(to, self._allow, self._plus_bases):
             raise MailRejected("the recipient is not on the allowlist")
         missing = [f for f in self._footer if f not in email.body]
         if missing:

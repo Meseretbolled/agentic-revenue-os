@@ -6,6 +6,7 @@ import psycopg
 
 from revos.adapters.claude_llm import ClaudeLLM
 from revos.adapters.fake_llm import FakeLLM
+from revos.modes import gmail_keys, hubspot_configured
 from revos.ports.llm import LLM
 
 
@@ -54,9 +55,9 @@ def build_crm():
     from revos.adapters.hubspot.crm import HubSpotCRM
     from revos.adapters.mock.crm import MockCRM
 
-    token = os.environ.get("HUBSPOT_TOKEN", "").strip()
-    if not token:
+    if not hubspot_configured():
         return MockCRM()
+    token = os.environ["HUBSPOT_TOKEN"].strip()
     base = os.environ.get("HUBSPOT_BASE_URL", "").strip() or DEFAULT_BASE_URL
     return HubSpotCRM(HubSpotClient(token, base))
 
@@ -73,8 +74,7 @@ def build_identity():
 
 
 def gmail_configured() -> bool:
-    return bool(os.environ.get("GMAIL_ADDRESS", "").strip()
-                and os.environ.get("GMAIL_APP_PASSWORD", "").strip())
+    return gmail_keys()
 
 
 def build_mail(conn: psycopg.Connection):
@@ -97,7 +97,7 @@ def build_mail(conn: psycopg.Connection):
     allowlist = frozenset({address.lower(), prospect} - {""}) if demo else None
     mailbox = ImapMailbox(address, password)
     mailer = GmailMailer(address, smtp=SmtplibTransport(address, password), mailbox=mailbox,
-                         allowlist=allowlist,
+                         allowlist=allowlist, plus_bases=frozenset({prospect} - {""}),
                          required_footer=(identity.unsubscribe_line, identity.postal_address),
                          sender_name=identity.sender_name)
 
@@ -140,5 +140,6 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
         conn, ro_conn, clock=clock or SystemClock(), packs=packs, runner=build_runner(conn),
         research=world.research, provider=router, identity=build_identity(),
         demo_mode=policy.demo_mode, allowed_recipients=policy.allowed_recipients,
+        plus_bases=policy.plus_bases,
         calendar=world.calendar, transcripts=world.transcripts, esign=world.esign, inbox=inbox,
         crm_sync=True, daily_cap=int(os.environ.get("DAILY_SEND_CAP", "20")))

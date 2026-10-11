@@ -40,11 +40,13 @@ from revos.domain.stages import DealStage, can_transition
 from revos.domain.untrusted import UntrustedText
 from revos.mcp.registry import BlockEvent, ToolContext
 from revos.mcp.scope import fixed_scope
+from revos.orchestrator import sweeps
 from revos.orchestrator.transitions import transition_deal
 from revos.policy.audit import write_audit
 from revos.policy.config import PolicyConfig
 from revos.policy.engine import ActionRequest
 from revos.policy.gate import GateResult, run_approved_action
+from revos.policy.recipients import base_of
 from revos.policy.service import propose_action, release_veto_expired
 from revos.policy.settings import release_held_sends
 from revos.ports.calendar import Calendar, Slot
@@ -125,8 +127,10 @@ class Orchestrator:
                  learn_from_replies: bool = False, esign: ESign | None = None,
                  handoff_channel: str = "#revops",
                  customer_success_owner: str = "customer-success", inbox: Inbox | None = None,
-                 crm_sync: bool = False, daily_cap: int | None = None) -> None:
+                 crm_sync: bool = False, daily_cap: int | None = None,
+                 plus_bases: frozenset[str] = frozenset()) -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
+        self.plus_bases = plus_bases
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
         self.demo_mode, self.allowed_recipients, self.calendar = demo_mode, allowed_recipients, calendar
@@ -162,7 +166,8 @@ class Orchestrator:
 
     def policy_config(self, pack: Pack) -> PolicyConfig:
         config = PolicyConfig.from_pack(pack, demo_mode=self.demo_mode,
-                                        allowed_recipients=self.allowed_recipients)
+                                        allowed_recipients=self.allowed_recipients,
+                                        plus_bases=self.plus_bases)
         if self.daily_cap is not None:                 # a real mailbox gets a lower cap than the pack's
             config = replace(config, daily_cap=min(config.daily_cap, self.daily_cap))
         return config
@@ -929,9 +934,10 @@ class Orchestrator:
                 return None, "ambiguous", sorted(rows)
         rows = [r[0] for r in self.conn.execute(
             "SELECT d.id FROM deals d JOIN contacts c ON c.id = d.contact_id "
-            "WHERE lower(c.email) = %s AND d.stage NOT IN ('closed_lost', 'do_not_contact', 'handoff') "
+            "WHERE regexp_replace(lower(c.email), '\\+[^@]*@', '@') = %s "
+            "AND d.stage NOT IN ('closed_lost', 'do_not_contact', 'handoff') "
             "AND EXISTS (SELECT 1 FROM messages m WHERE m.deal_id = d.id AND m.direction = 'outbound') "
-            "ORDER BY d.created_at", (email.from_addr.lower(),))]
+            "ORDER BY d.created_at", (base_of(email.from_addr),))]
         if len(rows) == 1:
             return rows[0], "sender", []
         return (None, "ambiguous", rows) if rows else (None, "none", [])
@@ -1132,7 +1138,14 @@ class Orchestrator:
         def signature_event(_conn: psycopg.Connection, job: Any) -> None:
             self.complete_signature(job.payload["envelope_id"])
 
-        return {"email.poll": poll, "signature.event": signature_event, "lead.created": lead_created,
+        def stall_scan(_conn: psycopg.Connection, job: Any) -> None:
+            sweeps.stall_scan(self.conn, self.clock)
+
+        def digest(_conn: psycopg.Connection, job: Any) -> None:
+            sweeps.digest(self.conn, self.clock)
+
+        return {"tracking.stall_scan": stall_scan, "tracking.digest": digest, "email.poll": poll,
+                "signature.event": signature_event, "lead.created": lead_created,
                 "action.send": send, "lessons.sweep": lessons_sweep,
                 "action.veto_expired": veto_expired, "lead.snooze_ended": snooze_ended,
                 "queue.release_held": release_held}

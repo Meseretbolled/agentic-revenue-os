@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 from revos.domain.errors import ActionNotApproved
 from revos.policy.audit import write_audit
 from revos.policy.config import OUTBOUND_TYPES, PolicyConfig
+from revos.policy.recipients import recipient_allowed
 from revos.policy.settings import kill_switch_on
 from revos.policy.windows import next_open, zone
 from revos.ports.clock import Clock
@@ -112,7 +113,8 @@ def send_with_gate(
         if action["to_suppressed"]:
             _cancel(conn, action, "suppressed", now)
             return GateResult("refused", "suppressed")
-        if config.demo_mode and action["to_email"].strip().lower() not in config.allowed_recipients:
+        if config.demo_mode and not recipient_allowed(
+                action["to_email"], config.allowed_recipients, config.plus_bases):
             _cancel(conn, action, "recipient_not_allowed", now)
             return GateResult("refused", "recipient_not_allowed")
 

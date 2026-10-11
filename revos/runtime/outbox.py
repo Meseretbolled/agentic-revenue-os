@@ -9,6 +9,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from revos.domain.errors import ActionNotApproved
+from revos.obs import log
 from revos.ports.clock import Clock
 from revos.ports.provider import ActionProvider
 
@@ -80,4 +81,6 @@ def execute_action(
                                       "recovered_from_provider": recovered,
                                       "decision_by": action["decision_by"]})),
         )
+        log("outbox", "action.sent", deal_id=action["deal_id"], action_id=str(action_id),
+            type=action["type"], provider_id=provider_id, recovered_from_provider=recovered)
         return provider_id

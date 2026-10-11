@@ -138,6 +138,53 @@ get its contact write refused (a permanent error, in the dead-letter list) while
 deal writes still go through; for a real HubSpot run, give demo contacts a valid-looking address
 such as the prospect test inbox.
 
+## Running the system by itself (`revos run`)
+
+`revos run` starts the API (port 8100), the worker and the scheduler in one process and prints a
+banner with REAL or MOCK for each integration. The scheduler enqueues `email.poll`,
+`tracking.stall_scan`, `tracking.digest`, `lessons.sweep` and `queue.release_held` (one key per time
+bucket, so two schedulers never duplicate). Ctrl-C finishes the job being run; a job that cannot
+finish within 15 seconds goes back on the queue with its attempt returned. Nothing is lost, and the
+outbox idempotency keys make a re-run safe. Before it starts it runs the doctor checks: a service
+that will run as REAL and fails stops the start (`--force` overrides, the failure is logged).
+
+* **Real by default**: keys in `.env` select the real adapter, missing keys select the mock. With a
+  key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
+  fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
+* **Not built yet, so MOCK even with a key**: Slack (Step 10), Fireflies (Step 11), Dropbox Sign
+  (Step 12), Tavily. Their doctor line can say `REAL OK` while the app runs them as MOCK; the banner
+  says which.
+* **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
+  distinct HubSpot contact (HubSpot merges by email and refuses `.test` and `.example`), and every
+  email lands in the one inbox. The demo-mode recipient rule accepts an address only if its domain
+  is the base address's and its local part is exactly the base local part, optionally followed by
+  `+tag`. `name2@`, `name.x+tag@`, `name+x@other.com` and `name+a+b@` are all refused.
+  `revos seed <tag>` creates one such lead.
+* **Reply matching with plus-addressed leads**: the reply comes *from the base address*, so the
+  sender alone cannot say which lead it answers. Thread headers (In-Reply-To/References) identify the
+  lead when the mail client keeps them; the `Reply-To` plus tag (`sender+<deal id prefix>@`) identifies
+  it when it does not; the sender rule compares base addresses and accepts only one open deal.
+  Covered offline by `tests/integration/test_plus_addresses.py`; which of the two a real client
+  provides is what `scripts/gmail_header_check.py` records.
+* **Correlation id**: one id is created with each event and follows it through the job, the agent
+  runs, the policy decision, the outbox action, the audit rows and every log line.
+  `revos trace <deal id>` (or `--lead <email>`, `--json`) merges events, agent runs and proposals, policy
+  decisions, outbox and CRM actions, emails, held replies, lessons and audit rows;
+  `revos trace --recent` is the old audit listing. Bodies are never shown.
+* **Logs**: JSON lines in `var/logs/revos.jsonl` (ts, level, component, deal_id, correlation_id,
+  message). Anything that looks like a key, token, app password or Authorization header, and the exact
+  value of every secret-looking variable in the environment, is replaced by `[redacted]` before it is
+  written. `revos logs --deal <id>` filters the file.
+
+### The live end-to-end run (owner's machine, real HubSpot and Gmail)
+
+`revos run` and `revos seed acme` were run for real. For the plus-addressed lead the system enriched,
+scored (tier C, 38/100) and wrote the contact, company and deal to the real HubSpot portal, all under
+one correlation id (`revos trace` shows the whole timeline). The first email was **held by the send
+window**, not sent: the pack only allows weekdays 09:00-17:00 in the recipient's timezone, and the run
+was on a Sunday. It is queued as a timer for Monday 09:00 UTC and `revos run` sends it then. Nothing was
+changed to get around the window. The first real email from `revos run` has therefore not been seen yet.
+
 ## Other services
 
 `revos doctor` checks each with one harmless read and prints one line: `REAL OK`, `REAL FAILED`

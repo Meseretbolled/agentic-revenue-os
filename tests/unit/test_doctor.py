@@ -239,8 +239,9 @@ def test_the_command_prints_one_line_per_service_and_exits_1_on_a_failure(monkey
                                                        Check("Slack", MOCK, "key missing")])
     result = CliRunner().invoke(app, ["doctor"])
     assert result.exit_code == 1
-    assert result.output.splitlines() == ["HubSpot       REAL FAILED  (auth, status 401)",
-                                          "Slack         MOCK  (key missing)"]
+    first, second = result.output.splitlines()
+    assert first.startswith("HubSpot       REAL FAILED  (auth, status 401)") and "will run as: " in first
+    assert second.startswith("Slack         MOCK  (key missing)") and second.endswith("will run as: MOCK")
     monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Slack", OK)])
     assert CliRunner().invoke(app, ["doctor"]).exit_code == 0
 

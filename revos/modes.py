@@ -1,0 +1,67 @@
+"""Which integrations run for real and which are mocks, decided from the environment alone.
+
+The rule: a real adapter is used whenever its keys exist; the mock is used only when they are
+missing. There is no fallback in between: if a key exists and the service then fails, the real
+adapter raises (and `revos doctor` fails). It never swaps in a mock quietly.
+
+Some services have keys in .env but no adapter in the app yet; they honestly run as MOCK."""
+
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+REAL, MOCK = "REAL", "MOCK"
+
+
+@dataclass(frozen=True)
+class Mode:
+    service: str            # the same names `revos doctor` prints
+    mode: str               # REAL or MOCK
+    why: str = ""
+
+    def line(self) -> str:
+        return f"{self.service:<14}{self.mode}" + (f"  ({self.why})" if self.why else "")
+
+
+def _has(env: Mapping[str, str], *names: str) -> bool:
+    return all(env.get(n, "").strip() for n in names)
+
+
+def hubspot_configured(env: Mapping[str, str] | None = None) -> bool:
+    return _has(os.environ if env is None else env, "HUBSPOT_TOKEN")
+
+
+def gmail_keys(env: Mapping[str, str] | None = None) -> bool:
+    return _has(os.environ if env is None else env, "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD")
+
+
+def llm_live(env: Mapping[str, str] | None = None) -> bool:
+    env = os.environ if env is None else env
+    return env.get("LLM_MODE", "fake") == "live" and _has(env, "ANTHROPIC_API_KEY")
+
+
+def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
+    env = os.environ if env is None else env
+
+    def not_built(name: str, key: str, step: str) -> Mode:
+        return Mode(name, MOCK, f"key found, but the {name} adapter arrives in {step}" if _has(env, key)
+                    else "no key")
+
+    llm_why = ("" if llm_live(env) else "LLM_MODE is fake" if env.get("LLM_MODE", "fake") != "live"
+               else "LLM_MODE=live but ANTHROPIC_API_KEY is missing: the app refuses to start")
+    return [
+        Mode("Postgres", REAL),
+        Mode("LLM budget", REAL if llm_live(env) else MOCK, llm_why),
+        Mode("HubSpot", REAL if hubspot_configured(env) else MOCK,
+             "" if hubspot_configured(env) else "no key"),
+        not_built("Slack", "SLACK_BOT_TOKEN", "Step 10"),
+        Mode("Gmail", REAL if gmail_keys(env) else MOCK, "" if gmail_keys(env) else "no key"),
+        not_built("Fireflies", "FIREFLIES_API_KEY", "Step 11"),
+        not_built("Dropbox Sign", "DROPBOX_SIGN_API_KEY", "Step 12"),
+        not_built("Tavily", "TAVILY_API_KEY", "a later step"),
+        Mode("Tunnel URL", MOCK, "only needed once Slack and webhooks are live"),
+    ]
+
+
+def mode_of(service: str, env: Mapping[str, str] | None = None) -> str:
+    return next(m.mode for m in integration_modes(env) if m.service == service)

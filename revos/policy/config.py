@@ -72,6 +72,7 @@ class PolicyConfig:
     cap_timezone: str = "UTC"                 # where "a day" starts for the caps
     demo_mode: bool = True                    # fail closed: empty allowlist means nobody
     allowed_recipients: frozenset[str] = frozenset()
+    plus_bases: frozenset[str] = frozenset()  # inboxes whose name+tag@ variants are also allowed
 
     @classmethod
     def from_pack(
@@ -80,6 +81,7 @@ class PolicyConfig:
         *,
         demo_mode: bool = True,
         allowed_recipients: frozenset[str] = frozenset(),
+        plus_bases: frozenset[str] = frozenset(),
     ) -> "PolicyConfig":
         """The pack's autonomy levels, caps, send window and discount limit become the policy."""
         p = pack.policy
@@ -94,6 +96,7 @@ class PolicyConfig:
             default_timezone=p.default_timezone,
             demo_mode=demo_mode,
             allowed_recipients=allowed_recipients,
+            plus_bases=plus_bases,
         )
 
     @classmethod
@@ -102,5 +105,6 @@ class PolicyConfig:
         return cls(
             demo_mode=os.environ.get("REVOS_ENV", "demo") == "demo",
             allowed_recipients=frozenset(a.strip().lower() for a in addresses if a.strip()),
+            plus_bases=frozenset({os.environ.get("PROSPECT_TEST_EMAIL", "").strip().lower()} - {""}),
             veto_window_seconds=int(os.environ.get("VETO_WINDOW_SECONDS", "60")),
         )

@@ -9,6 +9,7 @@ import psycopg
 from revos.adapters.clock import SystemClock
 from revos.db import connect, migrate
 from revos.domain.errors import PermanentError
+from revos.obs import correlation, log
 from revos.ports.clock import Clock
 from revos.runtime.queue import Job, claim_job, complete_job, fail_job
 
@@ -28,24 +29,40 @@ class Worker:
         self.clock = clock
         self.lease_seconds = lease_seconds
         self.rng = rng or random.Random()
+        self.current: Job | None = None        # the job being run, so a shutdown can release it
 
     def run_once(self, conn: psycopg.Connection) -> bool:
         """Run at most one job. Returns False when nothing was due."""
         job = claim_job(conn, self.clock, self.lease_seconds)
         if job is None:
             return False
+        self.current = job
+        deal = job.payload.get("deal_id")
+        try:
+            with correlation(job.correlation_id, conn):
+                log("queue", f"job started: {job.type}", deal_id=deal, job_id=job.id, attempt=job.attempts)
+                self._run(conn, job, deal)
+        finally:
+            self.current = None
+        return True
+
+    def _run(self, conn: psycopg.Connection, job: Job, deal: object) -> None:
         try:
             handler = self.handlers.get(job.type)
             if handler is None:
                 raise PermanentError(f"no handler registered for job type {job.type!r}")
             handler(conn, job)
         except PermanentError as exc:
-            fail_job(conn, job, str(exc), self.clock, self.rng, permanent=True)
+            outcome = fail_job(conn, job, str(exc), self.clock, self.rng, permanent=True)
+            log("queue", f"job failed for good: {job.type}", level="error", deal_id=deal, job_id=job.id,
+                error=f"{type(exc).__name__}: {exc}", outcome=outcome)
         except Exception as exc:  # noqa: BLE001 - any handler failure is retried with backoff
-            fail_job(conn, job, f"{type(exc).__name__}: {exc}", self.clock, self.rng)
+            outcome = fail_job(conn, job, f"{type(exc).__name__}: {exc}", self.clock, self.rng)
+            log("queue", f"job failed: {job.type}", level="warning", deal_id=deal, job_id=job.id,
+                error=f"{type(exc).__name__}: {exc}", outcome=outcome)
         else:
             complete_job(conn, job, self.clock)
-        return True
+            log("queue", f"job done: {job.type}", deal_id=deal, job_id=job.id)
 
 
 def main() -> None:

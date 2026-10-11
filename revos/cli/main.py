@@ -55,9 +55,12 @@ def doctor() -> None:
     from revos.doctor import FAILED, run_checks
     from revos.env import load_env_file
     load_env_file()
+    from revos.modes import integration_modes
     checks = run_checks()
     for check in checks:
-        typer.echo(check.line())
+        mode = next(m for m in integration_modes() if m.service == check.service)
+        note = f" ({mode.why})" if mode.mode == "MOCK" and "adapter" in mode.why else ""
+        typer.echo(f"{check.line():<58} will run as: {mode.mode}{note}")
     if any(c.status == FAILED for c in checks):
         raise typer.Exit(1)
 
@@ -124,25 +127,158 @@ def reset_demo_command(
 
 
 @app.command("trace")
-def trace(deal: str = typer.Option(None, help="only this deal id"),
-          limit: int = typer.Option(40, help="how many audit entries")) -> None:
-    """Recent audit entries, then replies held as ambiguous (matched to no deal)."""
+def trace(
+    deal_id: str = typer.Argument(None, help="the deal to trace"),
+    lead: str = typer.Option(None, "--lead", help="find the deal(s) by the contact's email"),
+    recent: bool = typer.Option(False, "--recent", help="recent audit entries and held replies"),
+    as_json: bool = typer.Option(False, "--json", help="machine-readable output"),
+    limit: int = typer.Option(40, help="how many audit entries with --recent"),
+) -> None:
+    """One deal's timeline (newest last): events, agent runs, policy decisions, outbox and CRM
+    actions, emails, held replies, lessons and audit rows, each with what happened and why."""
+    import json
+
     from revos.db import migrate
-    from revos.trace import audit_trail, held_replies
+    from revos.trace import audit_trail, find_deals, held_replies, timeline
     with connect() as conn:
         migrate(conn)
-        entries, held = audit_trail(conn, deal, limit), held_replies(conn)
-    table = Table("at", "actor", "event", "deal", "detail")
-    for e in entries:
-        table.add_row(e["at"].strftime("%m-%d %H:%M:%S"), e["actor"], e["event"],
-                      str(e["deal_id"] or "")[:8], str(e["detail"])[:80])
-    console = Console()
-    console.print(table)
-    if held:
-        console.print(f"[bold]{len(held)} reply(ies) held: more than one deal could own them[/bold]")
-        for h in held:
-            console.print(f"  {h['message_id']} from {h['from_addr']}: {(h['subject'] or '')[:60]!r} "
-                          f"candidates: {', '.join(str(c)[:8] for c in h['candidate_deal_ids'])}")
+        if recent or not (deal_id or lead):
+            entries, held = audit_trail(conn, None, limit), held_replies(conn)
+            if as_json:
+                typer.echo(json.dumps({"audit": entries, "held_replies": held}, default=str, indent=2))
+                return
+            table = Table("at", "actor", "event", "deal", "detail")
+            for e in entries:
+                table.add_row(e["at"].strftime("%m-%d %H:%M:%S"), e["actor"], e["event"],
+                              str(e["deal_id"] or "")[:8], str(e["detail"])[:80])
+            console = Console()
+            console.print(table)
+            if held:
+                console.print(f"[bold]{len(held)} reply(ies) held: more than one deal could own them[/bold]")
+                for h in held:
+                    console.print(f"  {h['message_id']} from {h['from_addr']}: "
+                                  f"{(h['subject'] or '')[:60]!r} candidates: "
+                                  f"{', '.join(str(c)[:8] for c in h['candidate_deal_ids'])}")
+            return
+        ids = [deal_id] if deal_id else [str(d["id"]) for d in find_deals(conn, lead)]
+        if not ids:
+            typer.echo(f"no deal found for {lead}", err=True)
+            raise typer.Exit(1)
+        result = {i: [e.as_dict() for e in timeline(conn, i)] for i in ids}
+        if as_json:
+            typer.echo(json.dumps(result, indent=2, default=str))
+            return
+        for i in ids:
+            typer.echo(f"Deal {i}")
+            for e in timeline(conn, i):
+                typer.echo(e.line())
+
+
+@app.command("logs")
+def logs(deal: str = typer.Option(None, "--deal", help="only this deal id"),
+         correlation: str = typer.Option(None, "--correlation", help="only this correlation id"),
+         tail: int = typer.Option(50, help="how many lines"),
+         path: str = typer.Option(None, help="log file (default var/logs/revos.jsonl)")) -> None:
+    """Print structured log lines from var/logs/revos.jsonl, optionally for one deal."""
+    import json
+
+    from revos.obs import read_log
+    for row in read_log(path, deal_id=deal, correlation_id=correlation, limit=tail):
+        typer.echo(json.dumps(row, ensure_ascii=False))
+
+
+@app.command("run")
+def run(
+    port: int = typer.Option(8100, help="API port"),
+    no_api: bool = typer.Option(False, "--no-api", help="run only the worker and the scheduler"),
+    force: bool = typer.Option(False, "--force", help="start even if a REAL service fails its check"),
+) -> None:
+    """Start the API, the worker and the scheduler together. Ctrl-C stops them cleanly."""
+    import signal
+    import threading
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import database_url, migrate
+    from revos.doctor import FAILED, run_checks
+    from revos.env import load_env_file
+    from revos.modes import REAL, integration_modes
+    from revos.obs import configure_logging, log
+    from revos.runtime.supervisor import Supervisor
+
+    load_env_file()
+    log_file = configure_logging()
+    modes = integration_modes()
+    typer.echo("revos run: Agentic Revenue OS")
+    for mode in modes:
+        typer.echo(f"  {mode.line()}")
+    typer.echo(f"  API           {'off' if no_api else f'http://127.0.0.1:{port}'}   logs: {log_file}")
+
+    failed = [c for c in run_checks() if c.status == FAILED
+              and any(m.service == c.service and m.mode == REAL for m in modes)]
+    for check in failed:
+        log("run", f"{check.service} will run as REAL but its check failed", level="error",
+            detail=check.detail)
+        typer.echo(f"  FAILED  {check.line()}", err=True)
+    if failed and not force:
+        typer.echo("A service that will run as REAL is not working. Fix it (revos doctor) or pass --force.\n"
+                   "The app never swaps in a mock quietly.", err=True)
+        raise typer.Exit(1)
+
+    with connect() as conn:
+        migrate(conn)
+    supervisor = Supervisor(
+        database_url=database_url(), clock=SystemClock(), api_port=None if no_api else port,
+        build_handlers=lambda conn, ro, clock: build_orchestrator(conn, ro, clock).handlers())
+    stop = threading.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: stop.set())
+    supervisor.start()
+    typer.echo("running. Ctrl-C to stop.")
+    while not stop.is_set() and not supervisor.stop_event.is_set():
+        stop.wait(0.5)
+    typer.echo("stopping: finishing the current job...")
+    report = supervisor.stop()
+    typer.echo("stopped cleanly" if report.finished_cleanly else
+               f"stopped; released job(s) {report.released_job_ids} back to the queue")
+    if supervisor.errors:
+        typer.echo("; ".join(supervisor.errors), err=True)
+        raise typer.Exit(1)
+
+
+@app.command("seed")
+def seed(
+    tag: str = typer.Argument("acme", help="makes the lead name+tag@<your prospect inbox>"),
+    company: str = typer.Option("Brightside Optical Group", help="a fictional company"),
+    domain: str = typer.Option("brightside-optical.example", help="its (fictional) web domain"),
+    contact: str = typer.Option("Sam Lee", help="a fictional contact name"),
+    segment: str = typer.Option(None, help="the segment pack (default: the demo pack)"),
+) -> None:
+    """Create one fictional lead addressed to a plus-address of PROSPECT_TEST_EMAIL and queue it."""
+    from pathlib import Path
+
+    from revos.adapters.clock import SystemClock
+    from revos.db import migrate
+    from revos.env import load_env_file
+    from revos.seed import demo_address
+    from revos.seed import seed_lead as seed_one
+    from revos.segments import load_all
+
+    load_env_file()
+    packs = load_all(Path(__file__).resolve().parent.parent.parent / "packs")
+    if segment is None:
+        segment = next((p.id for p in packs.values() if p.meta.demo), None)
+    if segment not in packs:
+        typer.echo(f"no segment pack {segment!r}; have: {', '.join(sorted(packs))}", err=True)
+        raise typer.Exit(1)
+    email = demo_address(tag)
+    with connect() as conn:
+        conn.autocommit = True
+        migrate(conn)
+        deal_id, created = seed_one(conn, SystemClock(), segment_id=segment,
+                                    pack_version=str(packs[segment].meta.version), company=company,
+                                    domain=domain, contact_name=contact, email=email)
+    typer.echo(f"{'seeded' if created else 'already seeded'}: deal {deal_id} for {email}")
 
 
 @app.callback()

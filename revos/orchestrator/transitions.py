@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from revos.domain.errors import DealNotFound, ExitCriteriaNotMet, IllegalTransition, StaleDeal
 from revos.domain.stages import DealStage, ExitCriteria, can_transition
+from revos.obs import log
 
 _COLUMN_FIELDS = ("tier", "total_score", "score_reason", "hubspot_deal_id")
 
@@ -76,4 +77,6 @@ def transition_deal(
                        "version": new_version}),
             ),
         )
+        log("transitions", "deal.stage_changed", deal_id=deal_id, actor=actor,
+            transition=f"{src.value} -> {to_stage.value}", reason=reason)
         return new_version
