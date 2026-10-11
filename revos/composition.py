@@ -13,6 +13,7 @@ from revos.modes import (
     hubspot_configured,
     slack_configured,
 )
+from revos.orchestrator.resets import CLOSED
 from revos.ports.llm import LLM
 
 
@@ -139,9 +140,11 @@ def build_mail(conn: psycopg.Connection):
 
     def our_ids() -> list[str]:
         # ours, and the id Gmail really gave each Sent copy when it differs
+        # only deals still open: every id costs one IMAP session, and a closed deal's thread needs no polling
         return [i for r in conn.execute(
-            "SELECT message_id, real_message_id FROM messages WHERE direction = 'outbound' AND "
-            "message_id IS NOT NULL ORDER BY id DESC LIMIT 100") for i in r if i]
+            "SELECT m.message_id, m.real_message_id FROM messages m JOIN deals d ON d.id = m.deal_id "
+            "WHERE m.direction = 'outbound' AND m.message_id IS NOT NULL AND d.stage <> ALL(%s) "
+            "ORDER BY m.id DESC LIMIT 100", (list(CLOSED),)) for i in r if i]
 
     def first_sent():
         return conn.execute("SELECT min(created_at) FROM messages WHERE direction = 'outbound'"

@@ -45,6 +45,11 @@ def tick(
     created = []
     now = clock.now()
     for sched in schedules:
+        # A tick whose predecessor has not finished is skipped: polls are idempotent, and a slow poll must not
+        # pile up a backlog that delays the sends queued behind it.
+        if conn.execute("SELECT 1 FROM jobs WHERE type = %s AND status IN ('queued', 'running') LIMIT 1",
+                        (sched.event_type,)).fetchone():
+            continue
         bucket = int(now.timestamp() // sched.every_seconds)
         key = f"schedule:{sched.event_type}:{bucket}"
         if record_event(conn, key, sched.event_type, {"bucket": bucket}, clock) is not None:

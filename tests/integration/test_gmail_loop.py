@@ -110,6 +110,7 @@ def test_polling_is_a_scheduled_event_with_one_key_per_window(conn, ro_conn, pac
     keys = tick(conn, clock)
     assert any(k.startswith("schedule:email.poll:") for k in keys)
     assert not any(k.startswith("schedule:email.poll:") for k in tick(conn, clock))     # same window
+    conn.execute("UPDATE jobs SET status = 'done'")                                       # it finished
     clock.advance(61)
     assert any(k.startswith("schedule:email.poll:") for k in tick(conn, clock))         # the next one
 

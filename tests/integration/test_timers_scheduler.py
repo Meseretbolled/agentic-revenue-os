@@ -51,8 +51,26 @@ def test_scheduler_twice_in_the_same_bucket_creates_no_duplicates(conn, clock) -
 def test_scheduler_adds_a_new_event_when_the_bucket_changes(conn, clock) -> None:
     schedules = (Schedule("email.poll", 60),)
     assert len(tick(conn, clock, schedules)) == 1
+    conn.execute("UPDATE jobs SET status = 'done'")              # the first poll finished
     clock.advance(61)
     assert len(tick(conn, clock, schedules)) == 1
     clock.advance(5)
     assert tick(conn, clock, schedules) == []
     assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 2
+
+
+def test_a_slow_poll_does_not_pile_up_a_backlog(conn, clock) -> None:
+    polls = (Schedule("email.poll", 60),)
+    assert tick(conn, clock, polls) != []
+    for _ in range(5):                                           # five minutes pass, the first poll never ran
+        clock.advance(60)
+        assert tick(conn, clock, polls) == []
+    assert conn.execute("SELECT count(*) FROM jobs WHERE type = 'email.poll'").fetchone()[0] == 1
+
+
+def test_the_next_poll_is_scheduled_once_the_previous_finished(conn, clock) -> None:
+    polls = (Schedule("email.poll", 60),)
+    tick(conn, clock, polls)
+    conn.execute("UPDATE jobs SET status = 'done' WHERE type = 'email.poll'")
+    clock.advance(60)
+    assert tick(conn, clock, polls) != []
