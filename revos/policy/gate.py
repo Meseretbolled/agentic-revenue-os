@@ -138,10 +138,22 @@ def send_with_gate(
         cap_tz = zone(config.cap_timezone, "UTC")
         day = now.astimezone(cap_tz).date()
         domain = action["to_email"].rsplit("@", 1)[-1].lower()
+        domain_bypassed = False
         try:
             with conn.transaction():
-                _reserve(conn, f"domain:{domain}", day, config.domain_cap)
-                _reserve(conn, "daily", day, config.daily_cap)
+                try:
+                    with conn.transaction():
+                        _reserve(conn, f"domain:{domain}", day, config.domain_cap)
+                except _CapReached:
+                    if not (config.domain_cap_bypass and config.demo_mode):
+                        raise
+                    domain_bypassed = True        # demo only: this one cap is skipped, and said so
+                _reserve(conn, "daily", day, config.daily_cap)       # the overall cap always applies
+            if domain_bypassed:
+                write_audit(conn, "gate", "domain_cap.bypassed", action["deal_id"], {
+                    "action_id": str(action_id), "domain": domain,
+                    "reason": f"demo bypass: the per-domain cap of {config.domain_cap} per day for "
+                              f"{domain} was reached"})
         except _CapReached as cap:
             midnight = datetime.combine(day + timedelta(days=1), time(0), tzinfo=cap_tz)
             retry_at = next_open(midnight, recipient_tz, config.send_window)

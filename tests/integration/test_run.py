@@ -74,7 +74,7 @@ def test_run_processes_a_lead_end_to_end_and_every_row_carries_one_correlation_i
     run = supervisor(test_db_url, clock)
     run.start()
     try:
-        wait_for(lambda: conn.execute("SELECT stage FROM deals").fetchone()[0] == "scored"
+        wait_for(lambda: conn.execute("SELECT stage FROM deals").fetchone()[0] in ("scored", "outreach")
                  and conn.execute("SELECT count(*) FROM actions WHERE type = 'first_touch'").fetchone()[0],
                  conn=conn)
     finally:

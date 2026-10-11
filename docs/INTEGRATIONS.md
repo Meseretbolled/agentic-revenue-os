@@ -197,6 +197,18 @@ startup error, in `revos run`, `revos doctor` and the composition root). While i
 `send_window.bypassed` audit row with the reason. The recipient allowlist, caps, suppression, the kill
 switch and hard blocks are untouched (there is a test for each).
 
+### Per-domain cap: `DOMAIN_CAP_MODE`
+
+The pack's per-domain daily cap is the default (`enforce`). Because every demo email goes to one domain,
+`DOMAIN_CAP_MODE=demo_bypass` skips ONLY that cap, only when `REVOS_ENV=demo` (otherwise `revos run`,
+`revos doctor` and the composition root refuse to start), and says `DOMAIN CAP BYPASSED: demo only (all
+demo mail goes to one domain)`. Each send it lets through writes a `domain_cap.bypassed` audit row. The
+overall daily cap, allowlist, suppression, kill switch, send window and hard blocks are untouched.
+
+`revos queue retry-held [--deal ID]` asks for sends held by the send window or a cap to be tried again
+now. Each goes through the same gate, so every check runs again; it is audited as `operator.retry_held`
+and never sends twice (outbox idempotency).
+
 ### Seed profiles
 
 `revos seed <tag> --profile hot|warm|cold` takes the lead's data from `revos/fixtures/seed_profiles.yaml`

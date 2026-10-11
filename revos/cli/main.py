@@ -56,10 +56,16 @@ def doctor() -> None:
     from revos.doctor import FAILED, run_checks
     from revos.env import load_env_file
     from revos.modes import integration_modes
-    from revos.policy.config import BYPASS_BANNER, ConfigError, send_window_bypassed
+    from revos.policy.config import (
+        BYPASS_BANNER,
+        DOMAIN_CAP_BANNER,
+        ConfigError,
+        domain_cap_bypassed,
+        send_window_bypassed,
+    )
     load_env_file()
     try:
-        bypass = send_window_bypassed()
+        bypass, cap_bypass = send_window_bypassed(), domain_cap_bypassed()
     except ConfigError as exc:
         typer.echo(f"CONFIG ERROR  {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -72,6 +78,8 @@ def doctor() -> None:
         else:
             typer.echo(mode.line_with(check.status, check.detail))
     typer.echo(f"{'Send window':<14}" + (BYPASS_BANNER if bypass else "enforced (the pack's weekday hours)"))
+    typer.echo(f"{'Domain cap':<14}"
+               + (DOMAIN_CAP_BANNER if cap_bypass else "enforced (the pack's per-domain cap)"))
     if any(c.status == FAILED for c in checks):
         raise typer.Exit(1)
 
@@ -231,12 +239,18 @@ def run(
     from revos.env import load_env_file
     from revos.modes import REAL, integration_modes
     from revos.obs import configure_logging, log
-    from revos.policy.config import BYPASS_BANNER, ConfigError, send_window_bypassed
+    from revos.policy.config import (
+        BYPASS_BANNER,
+        DOMAIN_CAP_BANNER,
+        ConfigError,
+        domain_cap_bypassed,
+        send_window_bypassed,
+    )
     from revos.runtime.supervisor import Supervisor
 
     load_env_file()
     try:
-        bypass = send_window_bypassed()
+        bypass, cap_bypass = send_window_bypassed(), domain_cap_bypassed()
     except ConfigError as exc:
         typer.echo(f"CONFIG ERROR  {exc}", err=True)
         raise typer.Exit(1) from exc
@@ -251,6 +265,10 @@ def run(
     if bypass:
         typer.echo(f"  !! {BYPASS_BANNER}. Allowlist, caps, suppression and the kill switch still apply.")
         log("run", BYPASS_BANNER, level="warning")
+    if cap_bypass:
+        typer.echo(f"  !! {DOMAIN_CAP_BANNER}. The daily cap, allowlist, suppression and kill "
+                   "switch still apply.")
+        log("run", DOMAIN_CAP_BANNER, level="warning")
 
     failed = [c for c in results.values() if c.status == FAILED
               and any(m.service == c.service and m.mode == REAL for m in modes)]
@@ -348,6 +366,18 @@ def dead_letters() -> None:
         table.add_row(str(r["id"]), str(r["job_id"]), r["type"], "yes" if r["retried_at"] else "no",
                       r["error"] or "")
     Console().print(table)
+
+
+@queue_app.command("retry-held")
+def retry_held(deal: str = typer.Option(None, "--deal", help="only this deal id")) -> None:
+    """Try sends held by the send window or a cap again now. They pass the full gate again."""
+    from uuid import UUID
+
+    from revos.policy.settings import retry_held_sends
+    with connect() as conn:
+        conn.autocommit = True
+        queued = retry_held_sends(conn, SystemClock(), "operator", UUID(deal) if deal else None)
+    typer.echo(f"queued {len(queued)} held send(s) for another attempt")
 
 
 @queue_app.command("retry")

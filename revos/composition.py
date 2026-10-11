@@ -141,5 +141,6 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
         research=world.research, provider=router, identity=build_identity(),
         demo_mode=policy.demo_mode, allowed_recipients=policy.allowed_recipients,
         plus_bases=policy.plus_bases, send_window_bypass=policy.send_window_bypass,
+        domain_cap_bypass=policy.domain_cap_bypass,
         calendar=world.calendar, transcripts=world.transcripts, esign=world.esign, inbox=inbox,
         crm_sync=True, daily_cap=int(os.environ.get("DAILY_SEND_CAP", "20")))

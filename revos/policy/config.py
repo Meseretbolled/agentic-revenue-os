@@ -74,6 +74,7 @@ class PolicyConfig:
     allowed_recipients: frozenset[str] = frozenset()
     plus_bases: frozenset[str] = frozenset()  # inboxes whose name+tag@ variants are also allowed
     send_window_bypass: bool = False          # SEND_WINDOW_MODE=demo_bypass; only ever true in demo mode
+    domain_cap_bypass: bool = False           # DOMAIN_CAP_MODE=demo_bypass; only ever true in demo mode
 
     @classmethod
     def from_pack(
@@ -84,6 +85,7 @@ class PolicyConfig:
         allowed_recipients: frozenset[str] = frozenset(),
         plus_bases: frozenset[str] = frozenset(),
         send_window_bypass: bool = False,
+        domain_cap_bypass: bool = False,
     ) -> "PolicyConfig":
         """The pack's autonomy levels, caps, send window and discount limit become the policy."""
         p = pack.policy
@@ -100,6 +102,7 @@ class PolicyConfig:
             allowed_recipients=allowed_recipients,
             plus_bases=plus_bases,
             send_window_bypass=send_window_bypass and demo_mode,
+            domain_cap_bypass=domain_cap_bypass and demo_mode,
         )
 
     @classmethod
@@ -110,6 +113,7 @@ class PolicyConfig:
             allowed_recipients=frozenset(a.strip().lower() for a in addresses if a.strip()),
             plus_bases=frozenset({os.environ.get("PROSPECT_TEST_EMAIL", "").strip().lower()} - {""}),
             send_window_bypass=send_window_bypassed(),
+            domain_cap_bypass=domain_cap_bypassed(),
             veto_window_seconds=int(os.environ.get("VETO_WINDOW_SECONDS", "60")),
         )
 
@@ -119,18 +123,28 @@ class ConfigError(ValueError):
 
 
 BYPASS_BANNER = "SEND WINDOW BYPASSED: demo only"
+DOMAIN_CAP_BANNER = "DOMAIN CAP BYPASSED: demo only (all demo mail goes to one domain)"
 
 
-def send_window_bypassed(env: Mapping[str, str] | None = None) -> bool:
-    """SEND_WINDOW_MODE=enforce (default) keeps the pack's send window. demo_bypass skips only that
-    one check, and only when REVOS_ENV is explicitly `demo`; anywhere else it is a startup error."""
+def _demo_bypass(name: str, env: Mapping[str, str] | None) -> bool:
+    """`name`=enforce (default) keeps the safeguard. demo_bypass relaxes only that one check, and only
+    when REVOS_ENV is explicitly `demo`; anywhere else it is a startup error."""
     env = os.environ if env is None else env
-    mode = env.get("SEND_WINDOW_MODE", "").strip().lower() or "enforce"
+    mode = env.get(name, "").strip().lower() or "enforce"
     if mode == "enforce":
         return False
     if mode != "demo_bypass":
-        raise ConfigError(f"SEND_WINDOW_MODE must be 'enforce' or 'demo_bypass', got {mode!r}")
+        raise ConfigError(f"{name} must be 'enforce' or 'demo_bypass', got {mode!r}")
     if env.get("REVOS_ENV", "").strip().lower() != "demo":
-        raise ConfigError("SEND_WINDOW_MODE=demo_bypass is only allowed when REVOS_ENV=demo; "
-                          "refusing to start")
+        raise ConfigError(f"{name}=demo_bypass is only allowed when REVOS_ENV=demo; refusing to start")
     return True
+
+
+def send_window_bypassed(env: Mapping[str, str] | None = None) -> bool:
+    """SEND_WINDOW_MODE: skips only the send-window check (see _demo_bypass)."""
+    return _demo_bypass("SEND_WINDOW_MODE", env)
+
+
+def domain_cap_bypassed(env: Mapping[str, str] | None = None) -> bool:
+    """DOMAIN_CAP_MODE: skips only the per-domain cap. Never the overall daily cap."""
+    return _demo_bypass("DOMAIN_CAP_MODE", env)

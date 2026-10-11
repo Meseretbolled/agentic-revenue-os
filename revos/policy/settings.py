@@ -75,3 +75,33 @@ def resume_after_kill_switch(conn: psycopg.Connection, clock: Clock, actor: str)
         conn.execute("UPDATE settings SET value = to_jsonb(%s::int), updated_at = now() "
                      "WHERE key = 'kill_switch_epoch'", (_epoch(conn) + 1,))
         return release_held_sends(conn, clock)
+
+
+TIMED_HOLDS = ("send_window", "cap:%")
+
+
+def retry_held_sends(conn: psycopg.Connection, clock: Clock, actor: str,
+                     deal_id: UUID | None = None) -> list[UUID]:
+    """An operator asks for held sends to be tried again now, instead of at their timer (a send held
+    by the send window or a cap). The send goes through the same gate as any other: every check runs
+    again, nothing is skipped, and it may simply be held again. Sends held by the kill switch are not
+    touched (that has its own resume). Each call queues a new attempt; the outbox's idempotency key
+    still prevents a second email."""
+    now = clock.now()
+    queued: list[UUID] = []
+    with conn.transaction():
+        held = conn.execute(
+            "SELECT id, deal_id FROM actions WHERE status = 'approved' AND run_at > %s AND "
+            "(hold_reason = 'send_window' OR hold_reason LIKE 'cap:%%') "
+            "AND (%s::uuid IS NULL OR deal_id = %s) "
+            "ORDER BY created_at, id", (now, deal_id, deal_id)).fetchall()
+        for action_id, held_deal in held:
+            attempt = conn.execute("SELECT count(*) FROM events WHERE idempotency_key LIKE %s",
+                                   (f"retry-held:{action_id}:%",)).fetchone()[0] + 1
+            conn.execute("UPDATE actions SET run_at = %s WHERE id = %s", (now, action_id))
+            record_event(conn, f"retry-held:{action_id}:{attempt}", "action.send",
+                         {"action_id": str(action_id), "deal_id": str(held_deal)}, clock)
+            write_audit(conn, actor, "operator.retry_held", held_deal,
+                        {"action_id": str(action_id), "attempt": attempt})
+            queued.append(action_id)
+    return queued
