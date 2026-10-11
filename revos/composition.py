@@ -66,7 +66,8 @@ def build_crm():
         return MockCRM()
     token = os.environ["HUBSPOT_TOKEN"].strip()
     base = os.environ.get("HUBSPOT_BASE_URL", "").strip() or DEFAULT_BASE_URL
-    return HubSpotCRM(HubSpotClient(token, base))
+    return HubSpotCRM(HubSpotClient(token, base), owner_id=os.environ.get("HUBSPOT_OWNER_ID"),
+                      owner_email=os.environ.get("HUBSPOT_OWNER_EMAIL"))
 
 
 def build_slack():
@@ -193,4 +194,5 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
         veto_window_seconds=(int(os.environ["VETO_WINDOW_SECONDS"])
                              if os.environ.get("VETO_WINDOW_SECONDS", "").strip() else None),
         calendar=world.calendar, transcripts=build_transcripts(world.transcripts), esign=esign,
-        inbox=inbox, crm_sync=True, daily_cap=int(os.environ.get("DAILY_SEND_CAP", "20")))
+        inbox=inbox, crm_sync=True, daily_cap=int(os.environ.get("DAILY_SEND_CAP", "20")),
+        sender_email=os.environ.get("GMAIL_ADDRESS", "").strip())

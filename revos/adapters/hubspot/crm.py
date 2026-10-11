@@ -6,6 +6,8 @@ the record instead of making a second one. As an ActionProvider it plugs into th
 is the check-before-retry lookup, perform() does the write."""
 
 import hashlib
+import json
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,6 +22,9 @@ KINDS = ("contacts", "companies", "deals")
 # HubSpot-defined association type ids for a note on a record (UNVERIFIED against a live portal
 # until `make live-hubspot` has been run).
 NOTE_ASSOCIATION = {"contacts": 202, "companies": 190, "deals": 214}
+# A logged email onto a contact (198) and a deal (210): HubSpot-defined association type ids.
+EMAIL_ASSOCIATION = {"contacts": 198, "deals": 210}
+EMAIL_KEY_MARK = ":crm:email:"
 NOTE_TOKEN_PREFIX = "revoskey"
 READ_PROPERTIES = ["revos_key", "revos_demo", "revos_deal_id", "revos_stage", "email", "domain",
                    "name", "dealname", "dealstage"]
@@ -58,9 +63,68 @@ def build_deal_properties(deal: Mapping[str, Any], fields: Mapping[str, Any],
 
 class HubSpotCRM:
     def __init__(self, client: HubSpotClient, *,
-                 stage_map: Mapping[DealStage, str] = DEFAULT_STAGE_MAP) -> None:
+                 stage_map: Mapping[DealStage, str] = DEFAULT_STAGE_MAP,
+                 owner_id: str | None = None, owner_email: str | None = None) -> None:
         self._c = client
         self._stages = stage_map
+        self._owner_id = (owner_id or "").strip() or None
+        self._owner_email = (owner_email or "").strip().lower() or None
+        self._owner: str | None = None
+        self._owner_resolved = False
+        self.owner_note = ""             # why no owner was set (for the CLI and the logs); never a secret
+
+    # --- owners ----------------------------------------------------------------------------------------
+    def owners(self) -> list[dict[str, Any]]:
+        """Every HubSpot user who can own a record (needs the crm.objects.owners.read scope)."""
+        out: list[dict[str, Any]] = []
+        after = None
+        while True:
+            params: dict[str, Any] = {"limit": 100, "archived": "false"}
+            if after:
+                params["after"] = after
+            page = self._c.request("GET", "/crm/v3/owners", params=params, what="list owners")
+            out += page.get("results", [])
+            after = ((page.get("paging") or {}).get("next") or {}).get("after")
+            if not after:
+                return out
+
+    def owner(self) -> str | None:
+        """The HubSpot owner id new and ownerless records get: HUBSPOT_OWNER_ID, else the owner with
+        HUBSPOT_OWNER_EMAIL, else the only owner there is. With several owners and no choice, none: a person
+        picks (`revos hubspot-owners`). A failure to look is remembered and never blocks a write."""
+        if self._owner_resolved:
+            return self._owner
+        if self._owner_id:
+            self._owner, self._owner_resolved = self._owner_id, True
+            return self._owner
+        try:
+            people = self.owners()
+        except (HubSpotError, HubSpotUnavailable) as exc:
+            self._owner_resolved = True
+            self.owner_note = f"owners could not be read: {exc}"[:200]
+            logging.getLogger("revos.hubspot").warning(self.owner_note)
+            return None
+        self._owner_resolved = True
+        if self._owner_email:
+            hit = next((p for p in people if str(p.get("email", "")).lower() == self._owner_email), None)
+            self._owner = str(hit["id"]) if hit else None
+            self.owner_note = "" if hit else "HUBSPOT_OWNER_EMAIL matches no HubSpot user"
+        elif len(people) == 1:
+            self._owner = str(people[0]["id"])
+        else:
+            self.owner_note = (f"{len(people)} HubSpot users exist: set HUBSPOT_OWNER_ID or "
+                               "HUBSPOT_OWNER_EMAIL (`revos hubspot-owners` lists them)")
+        return self._owner
+
+    def _ensure_owner(self, kind: str, record_id: str) -> None:
+        """Give a record the owner only when it has none, so a person's reassignment is never undone."""
+        owner = self.owner()
+        if owner is None:
+            return
+        got = self._c.request("GET", f"/crm/v3/objects/{kind}/{record_id}",
+                              params={"properties": "hubspot_owner_id"}, what=f"read owner of {kind}")
+        if not (got.get("properties") or {}).get("hubspot_owner_id"):
+            self._update(kind, record_id, {"hubspot_owner_id": owner}, f"set owner of {kind}")
 
     # --- low-level -------------------------------------------------------------------------------
     def _find(self, kind: str, prop: str, value: str) -> dict[str, Any] | None:
@@ -119,7 +183,9 @@ class HubSpotCRM:
 
     # --- typed operations ---------------------------------------------------------------------------
     def upsert_contact(self, email: str, props: Mapping[str, Any], key: str) -> tuple[str, bool]:
-        return self._upsert("contacts", ("email", email.strip().lower()), dict(props), key)
+        record_id, created = self._upsert("contacts", ("email", email.strip().lower()), dict(props), key)
+        self._ensure_owner("contacts", record_id)
+        return record_id, created
 
     def upsert_company(self, domain: str, props: Mapping[str, Any], key: str) -> tuple[str, bool]:
         return self._upsert("companies", ("domain", domain.strip().lower()), dict(props), key)
@@ -138,6 +204,7 @@ class HubSpotCRM:
         for kind, other in (("contacts", contact_id), ("companies", company_id)):
             if other:
                 self.associate("deals", record_id, kind, other)       # a PUT: safe to repeat
+        self._ensure_owner("deals", record_id)
         return record_id, created
 
     def add_note_to(self, kind: str, record_id: str, text: str, key: str) -> str:
@@ -167,6 +234,42 @@ class HubSpotCRM:
         filters = [{"propertyName": "hs_note_body", "operator": "CONTAINS_TOKEN",
                     "value": note_token(key)}]
         hit = next(iter(self._c.search_all("notes", filters, ["hs_note_body"], page_size=10)), None)
+        return str(hit["id"]) if hit else None
+
+    def log_email(self, key: str, *, contact_id: str | None, deal_id: str | None, direction: str,
+                  subject: str, text: str, at: str, from_addr: str, to_addr: str) -> str:
+        """An email on the contact's (and the deal's) timeline. `direction` is "outbound" or "inbound".
+        Looked up by its key token first, so a retry logs nothing twice. HubSpot sets Last Contacted itself
+        from logged emails: that property is read-only."""
+        existing = self._find_email(key)
+        if existing:
+            return existing
+        headers = {"from": {"email": from_addr}, "to": [{"email": to_addr}]} if from_addr or to_addr else {}
+        associations = [{"to": {"id": other}, "types": [{"associationCategory": "HUBSPOT_DEFINED",
+                                                         "associationTypeId": EMAIL_ASSOCIATION[kind]}]}
+                        for kind, other in (("contacts", contact_id), ("deals", deal_id)) if other]
+        body = {"properties": {
+            "hs_timestamp": at,
+            "hs_email_direction": "EMAIL" if direction == "outbound" else "INCOMING_EMAIL",
+            "hs_email_status": "SENT", "hs_email_subject": subject[:500],
+            "hs_email_text": f"{text}\n\n[{note_token(key)}] revosdemo",
+            "hs_email_headers": json.dumps(headers)}, "associations": associations}
+        for _ in range(3):
+            try:
+                return str(self._c.request("POST", "/crm/v3/objects/emails", json=body,
+                                           what="log email", retry_ambiguous=False)["id"])
+            except HubSpotUnavailable:
+                for wait in (0.0, 0.5, 1.5):
+                    if wait:
+                        self._c._sleep(wait)
+                    existing = self._find_email(key)
+                    if existing:
+                        return existing
+        raise HubSpotUnavailable("log email", "gave up after three tries")
+
+    def _find_email(self, key: str) -> str | None:
+        filters = [{"propertyName": "hs_email_text", "operator": "CONTAINS_TOKEN", "value": note_token(key)}]
+        hit = next(iter(self._c.search_all("emails", filters, ["hs_email_text"], page_size=10)), None)
         return str(hit["id"]) if hit else None
 
     def deal_id_for(self, revos_deal_id: str) -> str | None:
@@ -202,6 +305,8 @@ class HubSpotCRM:
                 for r in self._c.list_all(kind, READ_PROPERTIES)]
 
     def find_by_key(self, key: str) -> str | None:
+        if EMAIL_KEY_MARK in key:
+            return self._find_email(key)
         for kind in KINDS:
             hit = self._find(kind, "revos_key", key)
             if hit:
@@ -226,6 +331,17 @@ class HubSpotCRM:
         if action["type"] != "crm_update":
             raise PermanentError(f"HubSpot cannot perform {action['type']!r}")
         kind, props = payload["kind"], dict(payload.get("properties", {}))
+        if kind == "emails":
+            email = _need({"email": action.get("to_email")}, "email")
+            contact = self._find("contacts", "email", email.lower())
+            deal = self.deal_id_for(str(action["deal_id"]))
+            if contact is None or deal is None:        # the contact or deal write may not have landed yet
+                raise HubSpotUnavailable("log email", "the contact or deal is not in HubSpot yet")
+            return self.log_email(key, contact_id=str(contact["id"]), deal_id=deal,
+                                  direction=str(payload["direction"]),
+                                  subject=str(payload.get("subject", "")),
+                                  text=str(payload.get("text", "")), at=str(payload["at"]),
+                                  from_addr=str(payload.get("from", "")), to_addr=str(payload.get("to", "")))
         if kind == "contacts":
             return self.upsert_contact(_need({"email": action.get("to_email")}, "email"), props, key)[0]
         if kind == "companies":

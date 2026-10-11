@@ -464,3 +464,31 @@ Pending (veto countdown, approvals, hard blocks), Queue and dead letters, Lesson
   by the policy engine on every decision and are audited. The page shows each effective value and where it comes from.
 - `revos dashboard-seed` inserts clearly marked demo deals (rows only; nothing is queued or sent); `--clear` removes them.
 - Screenshots: `docs/screenshots/dashboard-*.png`.
+
+## What HubSpot shows about a deal
+
+- **Owner:** new and ownerless deals and contacts get the seller as owner (never overwriting a person's
+  reassignment). Pick the seller with `revos hubspot-owners`, then set `HUBSPOT_OWNER_ID` (or `HUBSPOT_OWNER_EMAIL`).
+  With exactly one HubSpot user that user is used; with several and no choice nobody is assigned.
+- **Score:** `revos_score`, `revos_tier` and `revos_score_reason` (every rule's written reason) are deal properties, and
+  the same text is a note on the deal ("Lead score 83/100, tier A ..."), written once per distinct score.
+  The properties live in the "Revenue OS" group; to see them on the deal card open the deal, Customize, About this deal,
+  and add that group (HubSpot decides card layout, the API cannot).
+- **Emails:** every sent and received email is logged on the contact's and the deal's timeline (an Emails engagement,
+  keyed by its Message-ID, so a retry logs nothing twice). HubSpot computes Last Contacted itself from logged emails:
+  it is read-only for us.
+- `revos hubspot-backfill [--deal ID]` queues all of that for existing deals; it is safe to repeat.
+
+### Scopes the HubSpot service key needs
+
+| What | Scope |
+|---|---|
+| Owners (list, assign) | `crm.objects.owners.read` |
+| Log and look up emails | `crm.objects.emails.read` (HubSpot also accepts `sales-email-read`), plus write access to emails (creating one already works with the current key) |
+| Notes | `crm.objects.contacts.write`, `crm.objects.deals.write` (already working) |
+| Custom properties (`revos hubspot-setup`) | `crm.schemas.contacts.write`, `crm.schemas.companies.write`, `crm.schemas.deals.write` (already working) |
+| Records | `crm.objects.contacts.read/write`, `crm.objects.companies.read/write`, `crm.objects.deals.read/write` |
+
+Checked live with the current key: owners and email lookups answer 403 MISSING_SCOPES (HubSpot names the scopes
+above); notes, properties and email creation are allowed. Email jobs that hit the missing read scope wait in the dead
+letters: add the scope, then press Retry on the dashboard's Queue page (or `revos queue retry <id>`).

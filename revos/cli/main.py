@@ -309,6 +309,50 @@ def hubspot_setup() -> None:
         typer.echo("deal stages our map uses that this pipeline lacks: " + ", ".join(report.stages_missing))
 
 
+@app.command("hubspot-owners")
+def hubspot_owners() -> None:
+    """List the HubSpot users who can own records, so you can pick the seller (HUBSPOT_OWNER_ID or
+    HUBSPOT_OWNER_EMAIL). Needs the crm.objects.owners.read scope on the service key."""
+    from revos.adapters.hubspot.client import HubSpotError, HubSpotUnavailable
+    from revos.adapters.hubspot.crm import HubSpotCRM
+    from revos.dashboard.data import mask_email
+    try:
+        people = HubSpotCRM(_hubspot_client()).owners()
+    except (HubSpotError, HubSpotUnavailable) as exc:
+        typer.echo(f"{exc}\nAdd the scope crm.objects.owners.read to the HubSpot service key.", err=True)
+        raise typer.Exit(1) from exc
+    for p in people:
+        name = f"{p.get('firstName') or ''} {p.get('lastName') or ''}".strip() or "(no name)"
+        typer.echo(f"{p['id']:<12} {name:<28} {mask_email(str(p.get('email') or ''))}")
+    only = " Only one: it is used automatically." if len(people) == 1 else ""
+    typer.echo(f"{len(people)} owner(s).{only}")
+
+
+@app.command("hubspot-backfill")
+def hubspot_backfill(deal: str = typer.Option("", help="one deal id; default every real deal")) -> None:
+    """Queue what HubSpot should hold for existing deals: owner, score note and every stored email on the
+    contact's timeline. Safe to repeat: what is already there queues nothing. `revos run` sends them."""
+    from uuid import UUID
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    load_env_file()
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        orch = build_orchestrator(conn, ro, SystemClock())
+        ids = [UUID(deal)] if deal else [r[0] for r in conn.execute(
+            "SELECT id FROM deals WHERE coalesce(fields->>'demo', 'false') <> 'true' ORDER BY created_at")]
+        total = 0
+        for deal_id in ids:
+            queued = orch.backfill_crm(deal_id)
+            total += queued
+            typer.echo(f"{deal_id}: {queued} write(s) queued")
+    typer.echo(f"{total} CRM write(s) queued. They are sent by the running `revos run` (or the next one).")
+
+
 @app.command("reset-demo")
 def reset_demo_command(
     hubspot: bool = typer.Option(False, "--hubspot", help="also delete the HubSpot demo records"),

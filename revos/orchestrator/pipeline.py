@@ -137,7 +137,8 @@ class Orchestrator:
                  crm_sync: bool = False, daily_cap: int | None = None,
                  plus_bases: frozenset[str] = frozenset(),
                  send_window_bypass: bool = False, domain_cap_bypass: bool = False,
-                 notifier: Any = None, veto_window_seconds: int | None = None) -> None:
+                 notifier: Any = None, veto_window_seconds: int | None = None,
+                 sender_email: str = "") -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.plus_bases, self.send_window_bypass = plus_bases, send_window_bypass
         self.domain_cap_bypass = domain_cap_bypass
@@ -150,6 +151,7 @@ class Orchestrator:
         self.esign, self.handoff_channel = esign, handoff_channel
         self.customer_success_owner = customer_success_owner
         self.inbox, self.crm_sync, self.daily_cap = inbox, crm_sync, daily_cap
+        self.sender_email = sender_email                # the From address shown on a logged outbound email
         self.store = RunStore(conn)
 
     def _audit_slots(self, deal_id: UUID, payload: Mapping[str, Any]) -> None:
@@ -1094,6 +1096,9 @@ class Orchestrator:
             "ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING",
             (deal_id, deal["contact_id"], email.message_id, email.in_reply_to, email.subject,
              email.body, reply.flagged))
+        if attempt == 1:                                  # a reprocess finds it logged already
+            self.log_email_to_crm(deal_id, "inbound", email.message_id, email.subject, email.body,
+                                  email.received_at, email.from_addr, email.to)
         runs: list[tuple[str, str]] = []
 
         def done(status: str, reason: str | None = None, label: str | None = None,
@@ -1197,6 +1202,40 @@ class Orchestrator:
                                          "crm_update", payload)
             if action_id:
                 queued.append(action_id)
+        if deal["score_reason"]:
+            # the written score on the deal's timeline, once per distinct score (the key holds a hash of it)
+            text = f"Lead score {deal['total_score']}/100, tier {deal['tier']}\n{deal['score_reason']}"
+            digest = canonical_hash([deal["total_score"], deal["tier"], deal["score_reason"]])
+            self._crm_note(deal_id, f"{deal_id}:score-note:{digest}", text)
+        return queued
+
+    def log_email_to_crm(self, deal_id: UUID, direction: str, message_id: str, subject: str | None,
+                         body: str | None, at: datetime, from_addr: str, to_addr: str) -> UUID | None:
+        """Put one email on the contact's timeline in the CRM: its own outbox action, keyed by the Message-ID,
+        so a retry or a repeat logs nothing twice and a CRM failure never touches the email itself."""
+        if not self.crm_sync or not message_id:
+            return None
+        contact_id = self._deal(deal_id)["contact_id"]
+        return self._crm_action(
+            deal_id, contact_id, f"{deal_id}:crm:email:{message_id}", "crm_update",
+            {"kind": "emails", "direction": direction, "subject": subject or "", "text": (body or "")[:6000],
+             "at": at.isoformat(), "from": from_addr, "to": to_addr})
+
+    def backfill_crm(self, deal_id: UUID) -> int:
+        """Queue everything the CRM should hold about a deal that may predate this code: the deal and its
+        owner, the written score and every stored email. Idempotent: what is already there queues nothing."""
+        queued = len(self.sync_to_crm(deal_id))
+        deal = self._deal(deal_id)
+        contact_email = self.conn.execute("SELECT email FROM contacts WHERE id = %s",
+                                          (deal["contact_id"],)).fetchone()[0]
+        for message_id, direction, subject, body, at in self.conn.execute(
+                "SELECT message_id, direction, subject, body, created_at FROM messages WHERE deal_id = %s "
+                "AND message_id IS NOT NULL ORDER BY id", (deal_id,)).fetchall():
+            outbound = direction == "outbound"
+            if self.log_email_to_crm(deal_id, direction, message_id, subject, body, at,
+                                     self.sender_email if outbound else contact_email,
+                                     contact_email if outbound else self.sender_email):
+                queued += 1
         return queued
 
     def _crm_note(self, deal_id: UUID, key: str, text: str) -> None:
@@ -1314,10 +1353,12 @@ class Orchestrator:
     def _superseded_crm_write(self, action_id: UUID) -> bool:
         """A CRM write that waited out a retry must not overwrite a newer snapshot of the same
         record (the stage going back from outreach to enriched). Each snapshot holds the whole
-        record, so a newer one replaces it; cancel the old one. Never touches mail."""
+        record, so a newer one replaces it; cancel the old one. Never touches mail. A logged email is not a
+        snapshot: each one is its own event and is never replaced by a later one."""
         with self.conn.transaction():
             row = self.conn.execute(
                 "UPDATE actions a SET status = 'cancelled' WHERE a.id = %s AND a.status = 'approved' "
+                "AND a.payload->>'kind' <> 'emails' "
                 "AND EXISTS (SELECT 1 FROM actions n WHERE n.deal_id = a.deal_id AND n.type = 'crm_update' "
                 "AND n.payload->>'kind' = a.payload->>'kind' AND n.status IN ('approved', 'sent') "
                 "AND (n.created_at, n.id) > (a.created_at, a.id)) RETURNING a.deal_id", (action_id,)
@@ -1398,8 +1439,11 @@ class Orchestrator:
                 (action["deal_id"], action["contact_id"], provider_id, payload.get("in_reply_to"),
                  payload.get("subject"), payload.get("body")))
             self._read_back_real_id(action["type"], action_id, provider_id)
-            self._crm_note(action["deal_id"], f"{action_id}:note",
-                           f"Email sent: {payload.get('subject')}\n\n{payload.get('body')}")
+            to = self.conn.execute("SELECT email FROM contacts WHERE id = %s",
+                                   (action["contact_id"],)).fetchone()
+            self.log_email_to_crm(action["deal_id"], "outbound", provider_id, payload.get("subject"),
+                                  payload.get("body"), self.clock.now(), self.sender_email,
+                                  to[0] if to else "")
             slug = payload.get("case_study_id")
             if slug:
                 message = self.conn.execute("SELECT id FROM messages WHERE message_id = %s",

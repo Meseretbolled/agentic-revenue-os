@@ -43,6 +43,11 @@ def error_detail(body: Any, token: str = "") -> str:
                    ) if isinstance(body.get("context", {}), dict) else []
     if names:
         parts.append("invalid properties: " + ", ".join(names))
+    scopes = sorted({str(sc) for e in body.get("errors", []) if isinstance(e, dict)
+                     for sc in (e.get("context") or {}).get("requiredGranularScopes", [])
+                     } if isinstance(body.get("errors"), list) else set())
+    if scopes:                                  # a missing-scope answer names what the key needs: say so
+        parts.append("any of these scopes is needed: " + ", ".join(scopes))
     text = " | ".join(parts)
     if token:
         text = text.replace(token, "[token]")

@@ -16,11 +16,12 @@ class FakeHubSpot:
     def __init__(self, token: str = TOKEN) -> None:
         self.token = token
         self.objects: dict[str, dict[str, dict[str, Any]]] = {k: {} for k in
-                                                              ("contacts", "companies", "deals", "notes")}
+                                                              ("contacts", "companies", "deals", "notes", "emails")}
         self.properties: dict[str, dict[str, dict[str, Any]]] = {k: {} for k in
                                                                  ("contacts", "companies", "deals")}
         self.groups: dict[str, set[str]] = {k: set() for k in ("contacts", "companies", "deals")}
         self.associations: list[tuple[str, str, str, str]] = []
+        self.association_types: list[tuple[str, str, int, str]] = []
         self.pipeline_stages = ["appointmentscheduled", "qualifiedtobuy", "presentationscheduled",
                                 "decisionmakerboughtin", "contractsent", "closedwon", "closedlost"]
         self.calls: list[tuple[str, str]] = []
@@ -30,6 +31,8 @@ class FakeHubSpot:
         self.retry_after: str | None = None
         self.after_create: Any = None                  # hook(kind) called after a create succeeds
         self.page_size = 100
+        self.owner_list: list[dict[str, Any]] = []          # GET /crm/v3/owners
+        self.owners_forbidden = False                       # the service key lacks crm.objects.owners.read
         self._next = 1000
 
     def transport(self) -> httpx.MockTransport:
@@ -57,6 +60,11 @@ class FakeHubSpot:
         return self.route(method, path, dict(request.url.params), body)
 
     def route(self, method: str, path: str, params: dict[str, str], body: dict[str, Any]) -> httpx.Response:
+        if path == "/crm/v3/owners":
+            if self.owners_forbidden:
+                return httpx.Response(403, json={"status": "error", "category": "MISSING_SCOPES",
+                                                 "message": "This app hasn't been granted all required scopes"})
+            return httpx.Response(200, json={"results": self.owner_list})
         if m := re.fullmatch(r"/crm/v3/objects/(\w+)/search", path):
             return self.search(m[1], body)
         if m := re.fullmatch(r"/crm/v3/objects/(\w+)", path):
@@ -110,6 +118,8 @@ class FakeHubSpot:
         self.objects[kind][record_id] = {"id": record_id, "properties": dict(props)}
         for assoc in body.get("associations", []):
             self.associations.append((kind, record_id, "?", assoc["to"]["id"]))
+            self.association_types.append((kind, record_id, assoc["types"][0]["associationTypeId"],
+                                           assoc["to"]["id"]))
         if self.after_create:
             override = self.after_create(kind)           # may raise, or return a different answer
             if override is not None:

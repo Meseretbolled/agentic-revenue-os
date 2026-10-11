@@ -45,15 +45,16 @@ def test_the_deal_carries_stage_score_tier_reason_and_outreach_status(conn, ro_c
     assert len(fake.objects["contacts"]) == 1 and len(fake.objects["companies"]) == 1
 
 
-def test_every_email_sent_leaves_a_note_on_the_deal(conn, ro_conn, pack, clock):
+def test_every_email_sent_is_logged_on_the_contacts_timeline(conn, ro_conn, pack, clock):
     fake = FakeHubSpot()
     rig = make_rig(conn, ro_conn, pack, clock, crm=hubspot(fake), crm_sync=True)
     first_touch_sent(rig)
     drain(rig, conn, clock)
     drain(rig, conn, clock, step=3600)
     (subject,) = conn.execute("SELECT subject FROM messages WHERE direction = 'outbound'").fetchone()
-    (note,) = notes(fake)
-    assert note.startswith(f"Email sent: {subject}")
+    (email,) = fake.objects["emails"].values()
+    assert email["properties"]["hs_email_subject"] == subject
+    assert email["properties"]["hs_email_direction"] == "EMAIL"
 
 
 def test_a_call_summary_is_a_note_with_the_call_fields(conn, ro_conn, pack, clock):
@@ -111,7 +112,7 @@ def test_a_retried_email_never_duplicates_the_crm_record_or_note(conn, ro_conn, 
     drain(rig, conn, clock, step=600)
     assert len(server.submitted) == 1
     assert {k: len(v) for k, v in fake.objects.items()} == {"contacts": 1, "companies": 1, "deals": 1,
-                                                            "notes": 1}
+                                                            "notes": 1, "emails": 1}      # one score note, one email
 
 
 def test_a_note_waits_for_its_deal_instead_of_dead_lettering(conn, ro_conn, pack, clock):

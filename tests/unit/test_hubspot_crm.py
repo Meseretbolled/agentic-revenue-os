@@ -314,3 +314,11 @@ def test_a_non_json_error_body_gives_no_detail() -> None:
     with pytest.raises(HubSpotError) as caught:
         HubSpotClient(TOKEN, http=fake, sleep=lambda s: None).request("GET", "/x")
     assert caught.value.detail == "" and "nope" not in str(caught.value)
+
+
+def test_a_missing_scope_answer_names_the_scopes_that_would_fix_it():
+    from revos.adapters.hubspot.client import error_detail
+    body = {"status": "error", "category": "MISSING_SCOPES", "message": "not granted",
+            "errors": [{"context": {"requiredGranularScopes": ["crm.objects.emails.read", "sales-email-read"]}}]}
+    text = error_detail(body, "tok")
+    assert "category=MISSING_SCOPES" in text and "crm.objects.emails.read" in text and "sales-email-read" in text
