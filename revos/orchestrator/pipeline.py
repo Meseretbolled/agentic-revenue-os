@@ -61,6 +61,7 @@ from revos.runtime import lessons as lesson_loop
 from revos.runtime.events import record_event
 from revos.runtime.quarantine import record_quarantine
 from revos.segments.loader import Pack
+from revos.skills.call_matching import DealFacts, match_call
 from revos.skills.claims import deterministic_check
 from revos.skills.crm_fields import call_summary, outreach_status, sequence_day
 from revos.skills.handoff import build_handoff
@@ -133,10 +134,11 @@ class Orchestrator:
                  crm_sync: bool = False, daily_cap: int | None = None,
                  plus_bases: frozenset[str] = frozenset(),
                  send_window_bypass: bool = False, domain_cap_bypass: bool = False,
-                 notifier: Any = None) -> None:
+                 notifier: Any = None, veto_window_seconds: int | None = None) -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.plus_bases, self.send_window_bypass = plus_bases, send_window_bypass
         self.domain_cap_bypass = domain_cap_bypass
+        self.veto_window_seconds = veto_window_seconds   # None: the pack's own window
         self.notifier = notifier                        # SlackNotifier, or None when Slack is not wired
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
@@ -210,6 +212,8 @@ class Orchestrator:
                                         plus_bases=self.plus_bases,
                                         send_window_bypass=self.send_window_bypass,
                                         domain_cap_bypass=self.domain_cap_bypass)
+        if self.veto_window_seconds is not None:       # VETO_WINDOW_SECONDS, set deliberately
+            config = replace(config, veto_window_seconds=self.veto_window_seconds)
         if self.daily_cap is not None:                 # a real mailbox gets a lower cap than the pack's
             config = replace(config, daily_cap=min(config.daily_cap, self.daily_cap))
         return config
@@ -796,25 +800,32 @@ class Orchestrator:
                               action_id=action[0], decision=action[1])
 
     # --- a call: transcript -> deal fields -> lessons ---------------------------------------------
-    def handle_transcript(self, deal_id: UUID, transcript_id: str) -> PipelineResult:
+    def handle_transcript(self, deal_id: UUID, transcript_id: str,
+                          transcript: Any = None) -> PipelineResult:
         """Turn a finished call into deal fields (each with its quote) and lessons (each with its
         evidence). A transcript with an instruction in it is quarantined and teaches nothing."""
-        if self.transcripts is None:
-            raise LookupError("no transcript source is configured")
-        transcript = self.transcripts.get(transcript_id)
+        if transcript is None:
+            if self.transcripts is None:
+                raise LookupError("no transcript source is configured")
+            transcript = self.transcripts.get(transcript_id)
         if transcript is None:
             raise LookupError(f"no transcript {transcript_id}")
         text = UntrustedText.wrap("transcript", transcript.id, transcript.text)
         runs: list[tuple[str, str]] = []
+        lessons_before = self.conn.execute("SELECT coalesce(max(id), 0) FROM lessons").fetchone()[0]
 
         def done(status: str, reason: str | None = None) -> PipelineResult:
             if status == "completed":
+                new = [r[0] for r in self.conn.execute(
+                    "SELECT id FROM lessons WHERE id > %s ORDER BY id", (lessons_before,))]
                 self._crm_note(deal_id, f"{deal_id}:callsummary:{transcript_id}", call_summary(
-                    transcript.title, clean_fields(self._deal(deal_id)["fields"] or {})))
+                    transcript.title, clean_fields(self._deal(deal_id)["fields"] or {}), new))
+                self._slack_call(deal_id, transcript_id, transcript.title)
             self.sync_to_crm(deal_id)
             if status == "needs_human":
                 write_audit(self.conn, "orchestrator", "pipeline.needs_human", deal_id,
-                            {"runner": self.runner.name, "reason": reason, "transcript": transcript_id})
+                            {"runner": self.runner.name, "reason": reason, "transcript": transcript_id,
+                             "quarantined": text.flagged})
             return PipelineResult(status, self._deal(deal_id)["stage"], self.runner.name, reason,
                                   runs=tuple(runs))
 
@@ -825,7 +836,11 @@ class Orchestrator:
             if run.status != "completed":
                 return done("needs_human", run.human_reason)
             self.apply_run(run, deal_id)
-            quotes = run.proposals[0]["payload"].get("quotes", {}) if run.proposals else {}
+            payload = run.proposals[0]["payload"] if run.proposals else {}
+            for field, why in (payload.get("rejected") or {}).items():
+                write_audit(self.conn, "orchestrator", "call.field_dropped", deal_id,
+                            {"transcript": transcript_id, "field": field, "reason": why})
+            quotes = payload.get("quotes", {})
             for name in ("objections", "needs"):
                 if name in quotes:
                     self._learn(deal_id, f"know:{transcript_id}:{name}", quotes[name],
@@ -833,6 +848,78 @@ class Orchestrator:
             return done("completed")
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
             return done("needs_human", f"{cause_of(exc)}: {exc}")
+
+    # --- finished calls from the transcript service: matched with evidence, never guessed ----------
+    def _open_deals(self) -> list[DealFacts]:
+        rows = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT d.id, co.name AS company, c.email, d.fields->>'meeting_start' AS meeting_start "
+            "FROM deals d JOIN contacts c ON c.id = d.contact_id "
+            "LEFT JOIN companies co ON co.id = d.company_id "
+            "WHERE d.stage NOT IN ('closed_lost', 'do_not_contact', 'handoff', 'closed_won')").fetchall()
+        facts = []
+        for r in rows:
+            try:
+                start = datetime.fromisoformat(r["meeting_start"]) if r["meeting_start"] else None
+            except ValueError:
+                start = None
+            facts.append(DealFacts(r["id"], r["company"] or "", r["email"], start))
+        return facts
+
+    def ingest_transcript(self, transcript_id: str) -> str:
+        """Match one finished transcript to a deal and process it. Returns 'processed', 'seen',
+        'held' or 'missing'. Safe to call any number of times for the same id."""
+        if self.transcripts is None:
+            return "missing"
+        if self.conn.execute("SELECT 1 FROM transcripts WHERE external_id = %s UNION ALL "
+                             "SELECT 1 FROM held_calls WHERE external_id = %s",
+                             (transcript_id, transcript_id)).fetchone():
+            return "seen"
+        transcript = self.transcripts.get(transcript_id)
+        if transcript is None:
+            return "missing"
+        match = match_call(transcript, self._open_deals())
+        if match.deal_id is None:               # ambiguous, or no evidence at all
+            with self.conn.transaction():
+                self.conn.execute(
+                    "INSERT INTO held_calls (external_id, title, started_at, reason, candidate_deal_ids) "
+                    "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (external_id) DO NOTHING",
+                    (transcript_id, transcript.title, transcript.date, match.kind, list(match.candidates)))
+                write_audit(self.conn, "orchestrator", "call.unmatched", None, {
+                    "transcript": transcript_id, "title": transcript.title, "reason": match.kind,
+                    "candidates": [str(c) for c in match.candidates]})
+            return "held"
+        first = self.conn.execute(
+            "INSERT INTO transcripts (deal_id, external_id, body) VALUES (%s, %s, %s) "
+            "ON CONFLICT (external_id) DO NOTHING RETURNING id", (match.deal_id, transcript_id,
+                                                                  transcript.text)).fetchone()
+        if first is None:
+            return "seen"
+        write_audit(self.conn, "orchestrator", "call.matched", match.deal_id, {
+            "transcript": transcript_id, "by": list(match.by)})
+        try:
+            result = self.handle_transcript(match.deal_id, transcript_id, transcript)
+            if result.status == "completed" and \
+                    DealStage(self._deal(match.deal_id)["stage"]) is DealStage.MEETING:
+                gate = self.run_qualification_gate(match.deal_id)      # criteria met: meeting -> qualified
+                write_audit(self.conn, "orchestrator", "call.qualification", match.deal_id, {
+                    "transcript": transcript_id, "result": gate.status, "note": gate.reason,
+                    "stage": gate.stage})
+        except Exception:
+            self.conn.execute("DELETE FROM transcripts WHERE id = %s", (first[0],))   # let the poll retry
+            raise
+        return "processed"
+
+    def poll_calls(self) -> list[tuple[str, str]]:
+        """Look for finished transcripts we have not handled. Idempotent per transcript id."""
+        if self.transcripts is None:
+            return []
+        return [(t.id, self.ingest_transcript(t.id)) for t in self.transcripts.list_recent()]
+
+    def _slack_call(self, deal_id: UUID, transcript_id: str, title: str) -> None:
+        if self.notifier is not None:
+            record_event(self.conn, f"slack:call:{transcript_id}", "slack.call",
+                         {"deal_id": str(deal_id), "transcript_id": transcript_id, "title": title},
+                         self.clock)
 
     def _learn(self, deal_id: UUID, step: str, quote: str, origin: str, source: str,
                runs: list[tuple[str, str]]) -> None:
@@ -1218,13 +1305,22 @@ class Orchestrator:
             if self.notifier is not None:
                 self.notifier.sync(UUID(job.payload["action_id"]))
 
+        def slack_call(_conn: psycopg.Connection, job: Any) -> None:
+            if self.notifier is not None:
+                self.notifier.post_call_summary(UUID(job.payload["deal_id"]), job.payload["transcript_id"],
+                                                job.payload["title"])
+
+        def calls_poll(_conn: psycopg.Connection, job: Any) -> None:
+            self.poll_calls()
+
         def stall_scan(_conn: psycopg.Connection, job: Any) -> None:
             sweeps.stall_scan(self.conn, self.clock)
 
         def digest(_conn: psycopg.Connection, job: Any) -> None:
             sweeps.digest(self.conn, self.clock, self.notifier)
 
-        return {"slack.sync": slack_sync, "tracking.stall_scan": stall_scan, "tracking.digest": digest,
+        return {"slack.call": slack_call, "calls.poll": calls_poll, "slack.sync": slack_sync,
+                "tracking.stall_scan": stall_scan, "tracking.digest": digest,
                 "email.poll": poll,
                 "signature.event": signature_event, "lead.created": lead_created,
                 "action.send": send, "lessons.sweep": lessons_sweep,

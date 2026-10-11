@@ -49,6 +49,14 @@ def demo() -> None:
     demo_main()
 
 
+@app.command("call-demo")
+def call_demo() -> None:
+    """Feed a scripted, fictional call through the same transcript port the real Fireflies adapter
+    uses: match it to a lead, extract fields with quotes, write lessons, qualify, all offline."""
+    from revos.call_demo import call_demo_main
+    call_demo_main()
+
+
 @app.command("doctor")
 def doctor() -> None:
     """One status per service: REAL OK, REAL FAILED (with a reason category) or MOCK, and what it
@@ -174,13 +182,14 @@ def trace(
     import json
 
     from revos.db import migrate
-    from revos.trace import audit_trail, find_deals, held_replies, timeline
+    from revos.trace import audit_trail, find_deals, held_calls, held_replies, timeline
     with connect() as conn:
         migrate(conn)
         if recent or not (deal_id or lead):
-            entries, held = audit_trail(conn, None, limit), held_replies(conn)
+            entries, held, calls = audit_trail(conn, None, limit), held_replies(conn), held_calls(conn)
             if as_json:
-                typer.echo(json.dumps({"audit": entries, "held_replies": held}, default=str, indent=2))
+                typer.echo(json.dumps({"audit": entries, "held_replies": held, "held_calls": calls},
+                                      default=str, indent=2))
                 return
             table = Table("at", "actor", "event", "deal", "detail")
             for e in entries:
@@ -188,6 +197,12 @@ def trace(
                               str(e["deal_id"] or "")[:8], str(e["detail"])[:80])
             console = Console()
             console.print(table)
+            if calls:
+                console.print(f"[bold]{len(calls)} call(s) held: no single deal matched[/bold]")
+                for call in calls:
+                    ids = ", ".join(str(c)[:8] for c in call["candidate_deal_ids"]) or "-"
+                    console.print(f"  {call['external_id']}: {(call['title'] or '')[:60]!r} "
+                                  f"({call['reason']}) candidates: {ids}")
             if held:
                 console.print(f"[bold]{len(held)} reply(ies) held: more than one deal could own them[/bold]")
                 for h in held:
@@ -390,6 +405,8 @@ def seed(
         company, domain, contact = chosen["company"], chosen["domain"], chosen["contact"]
         fields = {**chosen["fields"], **({"research_notes": chosen["research_notes"]}
                                          if chosen.get("research_notes") else {})}
+        if chosen.get("signer_email_tag"):
+            fields["signer_email"] = demo_address(chosen["signer_email_tag"])      # the lead record's signer
         timezone = chosen.get("timezone")
     with connect() as conn:
         conn.autocommit = True

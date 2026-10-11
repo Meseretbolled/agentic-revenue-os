@@ -124,7 +124,8 @@ def test_chat_records_posts_and_finds_them_by_key(world) -> None:
 
 
 def test_transcripts_serve_the_fictional_call(world) -> None:
-    assert world.transcripts.list_ready() == ["call-001", "call-002", "call-003"]
+    assert world.transcripts.list_ready() == ["call-001", "call-002", "call-003", "call-demo-001"]
+    assert world.transcripts.list_recent() == []          # a poll sees only calls that finish later
     t = world.transcripts.get("call-001")
     assert "budget is about fifty thousand" in t.text and world.transcripts.get("nope") is None
     assert world.transcripts.fetched == ["call-001", "nope"]

@@ -23,8 +23,9 @@ class Transcript:
     id: str
     title: str
     date: datetime
-    participants: tuple[str, ...]
+    participants: tuple[str, ...]          # Fireflies gives email addresses
     sentences: tuple[Sentence, ...]
+    summary: str = ""                       # Fireflies' own overview, if any (untrusted)
 
     @property
     def text(self) -> str:
@@ -32,9 +33,22 @@ class Transcript:
         return "\n".join(f"{s.speaker_name}: {s.text}" for s in self.sentences)
 
 
+@dataclass(frozen=True)
+class TranscriptInfo:
+    """What a listing shows: no content."""
+
+    id: str
+    title: str
+    date: datetime
+
+
 class Transcripts(Protocol):
     def get(self, transcript_id: str) -> Transcript | None: ...
 
     def list_ready(self) -> list[str]:
         """Ids of finished transcripts."""
+        ...
+
+    def list_recent(self) -> list[TranscriptInfo]:
+        """Recent finished transcripts, titles and dates only."""
         ...

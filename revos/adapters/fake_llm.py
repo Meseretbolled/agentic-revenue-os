@@ -46,15 +46,26 @@ _CALL_RULES: dict[str, tuple[str, ...]] = {
     "decision_maker": ("decision maker", "decision-maker", "approve this"),
     "signer": ("will sign", "is the signer", "signs the", "signatory"),
     "needs": ("we need", "looking for", "need to", "challenge"),
-    "objections": ("concern", "worried", "too expensive", "not sure"),
+    "objections": ("concern", "worried", "too expensive", "not sure", "cpm"),
+    "competitors": ("competitor", "currently use", "we use ", "compared to", "versus", "evaluating"),
+    "next_steps": ("next step", "send me", "follow up", "schedule", "let's meet", "send over"),
 }
 
+
+_ANGLES: dict[str, str] = {
+    "results": "lead with ROAS evidence",
+    "attribution": "lead with measurement and attribution",
+    "pricing": "lead with return on spend, not the price",
+    "compliance": "lead with brand compliance controls",
+    "timing": "lead with a fast launch plan",
+}
 
 _LESSON_TAGS: dict[str, tuple[str, ...]] = {
     "pricing": ("price", "pricing", "cost", "expensive", "budget"),
     "compliance": ("compliance", "brand"),
     "timing": ("timeline", "launch", "weeks", "quarter"),
     "attribution": ("attribution", "which campaigns", "cannot tell", "measure"),
+    "results": ("cpm", "roas", "return on", "results"),
     "objection": ("concern", "worried", "not sure"),
 }
 
@@ -146,7 +157,11 @@ class FakeLLM:
         self.prompts.append(block)
         quote = " ".join(line for line in block.splitlines()[1:-1]).strip()
         tags = tuple(t for t, words in _LESSON_TAGS.items() if any(w in quote.casefold() for w in words))
-        return LessonDraft(f"Prospects said: {quote}"[:300], tags)
+        topic = next((t for t in ("results", "pricing", "attribution", "compliance", "timing")
+                      if t in tags), None)
+        label = "CPM" if "cpm" in quote.casefold() else (topic or "call").capitalize()
+        lead = f"{label} objection: {_ANGLES[topic]}. " if topic else ""
+        return LessonDraft(f"{lead}Prospects said: {quote}"[:300], tags)
 
 
 def _claim(text: str, evidence_id: str):

@@ -42,10 +42,12 @@ class MockESign:
         if action["type"] != "send_io":
             raise ValueError(f"e-sign cannot perform {action['type']!r}")
         payload = action["payload"]
-        if not action.get("to_email"):
-            raise ValueError("no signer: the contact row has no email")
+        # the address is the lead record's signer_email, else the contact row's: never the payload
+        recipient = action.get("signer_email") or action.get("to_email")
+        if not recipient:
+            raise ValueError("no signer: neither the lead record nor the contact row has an email")
         return self.send(SignatureRequest(action["idempotency_key"], payload["title"],
-                                          payload["document"], action["to_email"],
+                                          payload["document"], recipient,
                                           payload["signer_name"], test_mode=True))
 
     # --- webhooks, shaped like Dropbox Sign's: event_hash = HMAC-SHA256(key, event_time + type) ---

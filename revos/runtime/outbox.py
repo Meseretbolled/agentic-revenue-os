@@ -51,7 +51,9 @@ def execute_action(
         cur = conn.cursor(row_factory=dict_row)
         # to_email comes from the contact row, never from the payload.
         action = cur.execute(
-            "SELECT a.*, c.email AS to_email FROM actions a "
+            "SELECT a.*, c.email AS to_email, "
+            "(SELECT d.fields->>'signer_email' FROM deals d WHERE d.id = a.deal_id) AS signer_email "
+            "FROM actions a "
             "LEFT JOIN contacts c ON c.id = a.contact_id WHERE a.id = %s FOR UPDATE OF a",
             (action_id,),
         ).fetchone()

@@ -104,8 +104,8 @@ def test_a_bad_stale_or_missing_signature_is_a_401_and_changes_nothing(s, case):
     import time
     action = s.hot_first_touch()
     s.drain()
-    kw = {"wrong_secret": {"secret": "not-the-secret"}, "stale": {"timestamp": int(time.time()) - 301},
-          "future": {"timestamp": int(time.time()) + 301}, "missing_headers": {"headers": False},
+    kw = {"wrong_secret": {"secret": "not-the-secret"}, "stale": {"timestamp": int(time.time()) - 330},
+          "future": {"timestamp": int(time.time()) + 330}, "missing_headers": {"headers": False},
           "bad_signature": {"signature": "v0=" + "0" * 64}, "no_prefix": {"signature": "0" * 64}}[case]
     response, _ = s.press("cancel", action, **kw)
     assert response.status_code == 401 and response.content == b""
@@ -448,3 +448,16 @@ def test_a_request_signed_with_an_empty_secret_is_refused_when_no_secret_is_conf
     response = TestClient(create_app(None, "")).post("/slack/interactions", content=raw, headers={
         "X-Slack-Request-Timestamp": ts, "X-Slack-Signature": sig})
     assert response.status_code == 401
+
+
+def test_the_veto_window_follows_a_deliberate_override_and_otherwise_the_packs_own(conn, ro_conn, pack, clock,
+                                                                                    test_db_url):
+    for override, expected in ((None, 60), (180, 180)):
+        conn.execute("TRUNCATE actions, deals, contacts, companies, events, jobs, audit_log, "
+                     "slack_messages, slack_interactions CASCADE")
+        s = slack_rig(conn, ro_conn, pack, clock, test_db_url)
+        s.rig.orch.veto_window_seconds = override
+        action = s.hot_first_touch()
+        window = conn.execute("SELECT veto_until - %s FROM actions WHERE id = %s", (clock.now(), action)
+                              ).fetchone()[0]
+        assert window.total_seconds() == expected

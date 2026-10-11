@@ -25,10 +25,12 @@ def sequence_day(first_sent: datetime | None, now: datetime) -> int | None:
     return None if first_sent is None else (now.date() - first_sent.date()).days + 1
 
 
-def call_summary(title: str, fields: Mapping[str, Any]) -> str:
-    """A CRM note for a finished call: what was said, each with the words it rests on."""
+def call_summary(title: str, fields: Mapping[str, Any], lesson_ids: list[int] | None = None) -> str:
+    """A CRM note for a finished call: what was said, each with the words it rests on, and the
+    lessons it taught."""
     lines = [f"Call summary: {title}"]
-    for name in ("budget", "timeline", "decision_maker", "signer", "needs", "objections"):
+    for name in ("budget", "timeline", "decision_maker", "signer", "needs", "objections", "competitors",
+                 "next_steps"):
         if fields.get(name):
             quote = fields.get(f"quote:{name}")
             lines.append(f"- {name.replace('_', ' ')}: {fields[name]}"
@@ -37,4 +39,6 @@ def call_summary(title: str, fields: Mapping[str, Any]) -> str:
         if fields.get(f"{role}_name"):
             lines.append(f"- {role.replace('_', ' ')} (name, role): {fields[f'{role}_name']}, "
                          f"{fields.get(f'{role}_role', 'role not stated')}")
+    if lesson_ids:
+        lines.append("- lessons written: " + ", ".join(f"L{i}" for i in lesson_ids))
     return "\n".join(lines)

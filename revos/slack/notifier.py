@@ -107,6 +107,36 @@ class SlackNotifier:
                                 (str(action_id),)).fetchone()
         return (row[0], row[1]) if row else None
 
+    def post_call_summary(self, deal_id: UUID, transcript_id: str, title: str) -> bool:
+        """One short Slack message per processed call: the fields it filled and the lessons it taught."""
+        row = self.conn.execute(
+            "SELECT d.stage, d.fields, c.full_name, co.name FROM deals d "
+            "LEFT JOIN contacts c ON c.id = d.contact_id LEFT JOIN companies co ON co.id = d.company_id "
+            "WHERE d.id = %s", (deal_id,)).fetchone()
+        if row is None:
+            return False
+        stage, fields, person, company = row
+        names = ("budget", "timeline", "decision_maker", "needs", "objections", "competitors", "next_steps")
+        got = [n for n in names if (fields or {}).get(n)]
+        lessons = [r[0] for r in self.conn.execute("SELECT id FROM lessons ORDER BY id DESC LIMIT 3")]
+        summary = (f"{person or 'The contact'} at {company or 'their company'}: stage *{stage}*. "
+                   f"Filled from the call (each with its quote): {', '.join(got) or 'nothing'}."
+                   + (f" Newest lessons: {', '.join(f'L{i}' for i in lessons)}." if lessons else ""))
+        with self.conn.transaction():
+            self.conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"call:{transcript_id}",))
+            if self.conn.execute("SELECT 1 FROM slack_messages WHERE kind = 'call' AND ref = %s",
+                                 (transcript_id,)).fetchone():
+                return False
+            head = f":telephone_receiver: *Call processed: {title}*"
+            blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": head}},
+                      {"type": "context", "elements": [{"type": "mrkdwn", "text": summary[:1800]}]}]
+            posted = self.slack.post(self.channel, f"Call processed: {title}", blocks)
+            self.conn.execute("INSERT INTO slack_messages (kind, ref, channel, ts, state) "
+                              "VALUES ('call', %s, %s, %s, 'posted')",
+                              (transcript_id, posted.channel, posted.ts))
+        return True
+
+
 
 def _claim_check(payload: Mapping[str, Any], status: str) -> str:
     claims = payload.get("claims") or []

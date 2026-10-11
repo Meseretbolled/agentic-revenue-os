@@ -22,6 +22,16 @@ def create_app(interactions: SlackInteractions | None = None,
     def secret() -> str:
         return signing_secret() if callable(signing_secret) else signing_secret
 
+    @app.middleware("http")
+    async def access_log(request: Request, call_next):
+        """One log line per request to the Slack endpoint: that it arrived and how it was answered.
+        Never the body, the headers or the query string."""
+        response = await call_next(request)
+        if request.url.path == "/slack/interactions":
+            log("slack", "interaction request", method=request.method, status=response.status_code,
+                content_length=request.headers.get("content-length"))
+        return response
+
     @app.get("/health")
     @app.get("/healthz")
     def health() -> dict[str, str]:

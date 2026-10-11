@@ -6,7 +6,7 @@ import psycopg
 
 from revos.adapters.claude_llm import ClaudeLLM
 from revos.adapters.fake_llm import FakeLLM
-from revos.modes import gmail_keys, hubspot_configured, slack_configured
+from revos.modes import fireflies_configured, gmail_keys, hubspot_configured, slack_configured
 from revos.ports.llm import LLM
 
 
@@ -71,6 +71,15 @@ def build_slack():
     if not slack_configured():
         return MockSlack(), channel
     return SlackAdapter(os.environ["SLACK_BOT_TOKEN"].strip()), channel
+
+
+def build_transcripts(world_transcripts):
+    """The transcript source: Fireflies when FIREFLIES_API_KEY is set, otherwise the mock."""
+    from revos.adapters.fireflies.client import FirefliesAdapter
+
+    if not fireflies_configured():
+        return world_transcripts
+    return FirefliesAdapter(os.environ["FIREFLIES_API_KEY"].strip())
 
 
 def build_identity():
@@ -157,5 +166,7 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
         plus_bases=policy.plus_bases, send_window_bypass=policy.send_window_bypass,
         domain_cap_bypass=policy.domain_cap_bypass,
         notifier=SlackNotifier(conn, slack, channel, clock, packs),
-        calendar=world.calendar, transcripts=world.transcripts, esign=world.esign, inbox=inbox,
-        crm_sync=True, daily_cap=int(os.environ.get("DAILY_SEND_CAP", "20")))
+        veto_window_seconds=(int(os.environ["VETO_WINDOW_SECONDS"])
+                             if os.environ.get("VETO_WINDOW_SECONDS", "").strip() else None),
+        calendar=world.calendar, transcripts=build_transcripts(world.transcripts), esign=world.esign,
+        inbox=inbox, crm_sync=True, daily_cap=int(os.environ.get("DAILY_SEND_CAP", "20")))

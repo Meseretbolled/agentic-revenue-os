@@ -7,7 +7,8 @@ from revos.adapters.hubspot.client import HubSpotClient, HubSpotError
 from revos.adapters.hubspot.stages import DEFAULT_STAGE_MAP, PIPELINE
 
 GROUP = "revos"
-CALL_FIELDS = ("budget", "timeline", "decision_maker", "signer", "needs", "objections")
+CALL_FIELDS = ("budget", "timeline", "decision_maker", "signer", "needs", "objections", "competitors",
+               "next_steps")
 
 
 @dataclass(frozen=True)

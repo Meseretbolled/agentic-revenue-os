@@ -431,7 +431,8 @@ def test_knowledge_writes_a_lesson_with_its_quote_and_skips_duplicates(conn, ro_
     first = rig.orch.run_agent(rig.deal_id, "knowledge", "know.1", untrusted={"candidate": quote})
     rig.orch.apply_run(first, rig.deal_id)
     row = conn.execute("SELECT text, evidence, tags, segment_id FROM lessons").fetchone()
-    assert row[0].startswith("Prospects said:") and "brand compliance" in row[1]
+    assert row[0].startswith("Compliance objection: lead with brand compliance controls.") \
+        and "Prospects said:" in row[0] and "brand compliance" in row[1]
     assert "compliance" in row[2] and row[3] == pack.id
     second = rig.orch.run_agent(rig.deal_id, "knowledge", "know.2", untrusted={"candidate": quote})
     assert second.proposals == [] and "duplicate" in second.output["notes"]

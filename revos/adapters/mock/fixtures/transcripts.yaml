@@ -36,3 +36,21 @@ transcripts:
       - {speaker_name: Sam Lee, text: "Dana Park, our CMO, is the decision maker."}
       - {speaker_name: Sam Lee, text: "Priya Nair, our Head of Finance, will sign the agreement."}
       - {speaker_name: Sam Lee, text: "One concern is that we cannot tell which campaigns actually work, so attribution worries us."}
+  # The scripted call for `revos call-demo` (fictional). {contact_email} is filled in with the lead's
+  # own address. The signer sentence names a person AND an email address on purpose: only the name can
+  # ever be used; the signer's email comes from the lead record.
+  - id: call-demo-001
+    title: "Harborview Optical Collective - intro call"
+    date: "2026-10-15T15:00:00+00:00"
+    participants: ["jo@sender.example", "{contact_email}"]
+    sentences:
+      - {speaker_name: Jo Rivers, text: "Thanks for joining, Maya. What are you hoping to solve?"}
+      - {speaker_name: Maya Ortiz, text: "We need local campaigns for all of our locations without every owner redoing the creative."}
+      - {speaker_name: Jo Rivers, text: "What does your budget look like?"}
+      - {speaker_name: Maya Ortiz, text: "Our budget is about two hundred thousand dollars for the first year."}
+      - {speaker_name: Maya Ortiz, text: "The timeline is to launch by Q1, ideally within ten weeks."}
+      - {speaker_name: Maya Ortiz, text: "Dana Park, our CMO, is the decision maker."}
+      - {speaker_name: Maya Ortiz, text: "Priya Nair, our Head of Finance, will sign the agreement, her email is priya@elsewhere.example."}
+      - {speaker_name: Maya Ortiz, text: "My main concern is that our CPM keeps climbing and we cannot tell the return on it."}
+      - {speaker_name: Maya Ortiz, text: "We currently use a regional agency and we are comparing it to a couple of platforms."}
+      - {speaker_name: Maya Ortiz, text: "The next step is to send me the ROAS evidence and schedule a follow up with Dana."}

@@ -141,6 +141,37 @@ get its contact write refused (a permanent error, in the dead-letter list) while
 deal writes still go through; for a real HubSpot run, give demo contacts a valid-looking address
 such as the prospect test inbox.
 
+## Fireflies (call intelligence)
+
+**Status: the real GraphQL adapter is built and tested against a fake server; the live calls are described
+under "What ran live" once the owner's run is recorded. `revos call-demo` runs a scripted call offline.**
+
+* **Adapter**: `https://api.fireflies.ai/graphql`, `Authorization: Bearer <FIREFLIES_API_KEY>`. It lists recent
+  transcripts (id, title, date; no content) and fetches one (title, date, participant emails, speaker-labelled
+  sentences, Fireflies' overview). 429 and 5xx are retried with backoff (a `Retry-After` is honoured); any other
+  client error is permanent; errors carry Fireflies' error code and nothing else. The key is never in an error or a repr.
+* **Completion: polling only.** `calls.poll` runs every five minutes and is idempotent per transcript id. There is
+  **no `/fireflies/webhook`**. Fireflies' docs say a webhook carries an `x-hub-signature` header, "a SHA-256 HMAC
+  signature of the request payload", but do not say whether it covers the raw body or a parsed form, nor how the
+  signature is encoded, and say nothing about the free plan. Without that the scheme would be guesswork, so it is
+  not implemented; a test asserts the route does not exist.
+* **Matching a call to a deal**, in this order, each rule narrowing the candidates only if one survives: a
+  participant email equals the contact (an exact address beats a plus-variant of the same inbox); the title contains
+  the deal's short id or the company name; the call started within three hours of the booked meeting. Exactly one
+  deal left means a match; more than one, or no evidence at all, means the call is **held** (table `held_calls`,
+  audit `call.unmatched`, shown by `revos trace --recent`) and never guessed.
+* **Untrusted**: the transcript is wrapped as untrusted text and scanned; one containing an instruction is quarantined
+  (no field, no lesson, the model never sees it) and goes to a person.
+* **Extraction** (budget, timeline, decision maker, signer, needs, objections, competitors, next steps): every value
+  carries a verbatim quote, checked in code; a value whose quote is not in the transcript is dropped and audited
+  (`call.field_dropped`). A signer NAME is all a call can give: the signer's address comes from the lead record
+  (`signer_email`, seeded as a fictional plus-address) and the recipient allowlist applies to it; an agent cannot
+  write that field.
+* **After a call**: lessons are written with their evidence quote (modest starting confidence), the qualification
+  gate runs and moves `meeting -> qualified` only through `transition_deal()` (or says what is missing), HubSpot gets
+  the call fields, a note with the summary and lesson ids and the stage, and Slack gets a short summary.
+* `revos hubspot-setup` creates the two new properties (`revos_call_competitors`, `revos_call_next_steps`).
+
 ## Slack (the veto window, approvals, the digest)
 
 **Status: the real adapter has posted one message and updated it in place (`revos slack-test`). The signed
@@ -197,7 +228,7 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
 * **Real by default**: keys in `.env` select the real adapter, missing keys select the mock. With a
   key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
   fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
-* **Not built yet, so MOCK even with a key**: Fireflies (Step 11), Dropbox Sign
+* **Not built yet, so MOCK even with a key**: Dropbox Sign
   (Step 12), Tavily. For these, `revos doctor` and the banner say `key OK, adapter not built yet:
   runs as MOCK` (or `key NOT working (...)`) instead of `REAL OK`.
 * **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
@@ -310,7 +341,7 @@ value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dr
 | LLM budget | reads the spend ledger; never calls the model | not run with a live key |
 | Slack | `auth.test`; also notes a missing `SLACK_SIGNING_SECRET` | REAL OK; a real post and in-place update succeeded |
 | Gmail | IMAP login and logout only | REAL OK (owner's run) |
-| Fireflies | GraphQL `{ user { user_id } }` | REAL OK (owner's run) |
+| Fireflies | GraphQL `{ user { user_id } }` | REAL OK; the transcript adapter is built (see the Fireflies section) |
 | Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | REAL OK (owner's run) |
 | Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | our call matches Tavily's documented shape; the owner's key was answered 403, which doctor now reports as `key rejected` (check or regenerate the key) |
 | Tunnel URL | `GET <PUBLIC_BASE_URL>/healthz` | unverified live |

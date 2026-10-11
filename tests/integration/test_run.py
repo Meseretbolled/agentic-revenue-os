@@ -168,8 +168,8 @@ def test_the_scheduler_enqueues_each_recurring_event_once_even_with_two_schedule
         b.stop()
     kinds = dict(conn.execute("SELECT type, count(*) FROM events WHERE idempotency_key LIKE 'schedule:%' "
                               "GROUP BY type").fetchall())
-    assert set(kinds) == {"email.poll", "tracking.stall_scan", "tracking.digest", "lessons.sweep",
-                          "queue.release_held"}
+    assert set(kinds) == {"email.poll", "calls.poll", "tracking.stall_scan", "tracking.digest",
+                          "lessons.sweep", "queue.release_held"}
     assert set(kinds.values()) == {1}
 
 

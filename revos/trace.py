@@ -142,3 +142,10 @@ def held_replies(conn: psycopg.Connection) -> list[dict[str, Any]]:
     return conn.cursor(row_factory=dict_row).execute(
         "SELECT message_id, from_addr, subject, received_at, reason, candidate_deal_ids FROM held_replies "
         "WHERE resolved_at IS NULL ORDER BY id").fetchall()
+
+
+def held_calls(conn: psycopg.Connection) -> list[dict[str, Any]]:
+    """Finished calls that matched no deal, or more than one. Held for a person; never guessed."""
+    return conn.cursor(row_factory=dict_row).execute(
+        "SELECT external_id, title, started_at, reason, candidate_deal_ids FROM held_calls "
+        "WHERE resolved_at IS NULL ORDER BY id").fetchall()

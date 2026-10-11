@@ -10,6 +10,9 @@
 # facts about the fictional company; each `source` must say it is a fictional demo profile, and the
 # emails label them so. They are never real research, and real research found later takes priority.
 #
+# `signer_email_tag` makes the signer's address a plus-address of PROSPECT_TEST_EMAIL (fictional). The
+# signer's email always comes from the lead record like this, never from what is said on a call.
+#
 # Expected tiers come from the pack's own weights (fit 0.5, intent 0.3, engagement 0.2; A >= 65,
 # B >= 40, C >= 20); tests/unit/test_seed_profiles.py enforces them.
 franchise_brands:
@@ -18,6 +21,8 @@ franchise_brands:
     domain: harborview-optical.example
     contact: Maya Ortiz
     expect_tier: A
+    signer_email_tag: signer-harborview
+    signer_note: fictional demo signer (invented for this demo)
     timezone: America/Chicago
     research_notes:
       - text: "Harborview Optical Collective runs 85 locations across Texas and Oklahoma."
@@ -42,6 +47,8 @@ franchise_brands:
     domain: millbrook-inns.example
     contact: Lee Chen
     expect_tier: B
+    signer_email_tag: signer-millbrook
+    signer_note: fictional demo signer (invented for this demo)
     timezone: America/Toronto
     research_notes:
       - text: "Millbrook Inns runs 22 inns across Ontario and Quebec."
@@ -62,6 +69,8 @@ franchise_brands:
     domain: ridgeline-parts.example
     contact: Pat Kim
     expect_tier: C
+    signer_email_tag: signer-ridgeline
+    signer_note: fictional demo signer (invented for this demo)
     timezone: America/Mexico_City
     research_notes:
       - text: "Ridgeline Auto Parts runs 12 stores across Mexico."

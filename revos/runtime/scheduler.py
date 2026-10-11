@@ -17,6 +17,7 @@ class Schedule:
 
 DEFAULT_SCHEDULES: tuple[Schedule, ...] = (
     Schedule("email.poll", 60),
+    Schedule("calls.poll", 300),               # finished Fireflies transcripts (the webhook is not used)
     Schedule("tracking.stall_scan", 3600),
     Schedule("tracking.digest", 86400),
     Schedule("lessons.sweep", 86400),          # silence after a lesson was used counts against it

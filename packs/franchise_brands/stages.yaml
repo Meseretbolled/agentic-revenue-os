@@ -22,4 +22,4 @@ sla_hours:
   io_approval: 24
   out_for_signature: 120
 
-qualification_fields: [budget, timeline, decision_maker, signer, needs, objections]
+qualification_fields: [budget, timeline, decision_maker, signer, needs, objections, competitors, next_steps]

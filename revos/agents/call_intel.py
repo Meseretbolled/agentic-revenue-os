@@ -28,6 +28,7 @@ def run(env: AgentEnv) -> AgentOutput:
             properties[f"{field}_role"] = person.role
             properties[f"quote:{field}_name"] = result.fields[field].quote
     proposal = make("enrich", env.deal_id, env.contact_id,
-                    {"properties": properties, "quotes": quotes, "source": transcript.origin},
+                    {"properties": properties, "quotes": quotes, "source": transcript.origin,
+                     "rejected": dict(result.rejected)},
                     sorted(result.fields), f"{len(result.fields)} call field(s) with quotes")
     return AgentOutput((proposal,), notes=f"rejected: {result.rejected}" if result.rejected else "")

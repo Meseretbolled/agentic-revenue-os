@@ -84,7 +84,8 @@ def send_with_gate(
     now = clock.now()
     with conn.transaction():
         action = conn.cursor(row_factory=dict_row).execute(
-            "SELECT a.*, c.email AS to_email, c.timezone AS to_tz, c.suppressed AS to_suppressed "
+            "SELECT a.*, c.email AS to_email, c.timezone AS to_tz, c.suppressed AS to_suppressed, "
+            "(SELECT d.fields->>'signer_email' FROM deals d WHERE d.id = a.deal_id) AS signer_email "
             "FROM actions a LEFT JOIN contacts c ON c.id = a.contact_id "
             "WHERE a.id = %s FOR UPDATE OF a",
             (action_id,),
@@ -117,6 +118,14 @@ def send_with_gate(
                 action["to_email"], config.allowed_recipients, config.plus_bases):
             _cancel(conn, action, "recipient_not_allowed", now)
             return GateResult("refused", "recipient_not_allowed")
+
+        # The signer's address comes from the lead record (never from a transcript or a payload), and the
+        # same allowlist applies to it.
+        signer = (action.get("signer_email") or "").strip()
+        if (action["type"] == "send_io" and signer and config.demo_mode
+                and not recipient_allowed(signer, config.allowed_recipients, config.plus_bases)):
+            _cancel(conn, action, "signer_not_allowed", now)
+            return GateResult("refused", "signer_not_allowed")
 
         # 4. Timing: not due yet, then the recipient's local send window.
         if action["run_at"] > now:
