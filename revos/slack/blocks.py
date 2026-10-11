@@ -40,10 +40,6 @@ def _text(text: str) -> dict[str, Any]:
     return {"type": "mrkdwn", "text": text}
 
 
-def _fields(*pairs: tuple[str, str]) -> dict[str, Any]:
-    return {"type": "section", "fields": [_text(f"*{k}*\n{v}") for k, v in pairs if v]}
-
-
 def _clock(moment: datetime | None) -> str:
     return f"{moment:%Y-%m-%d %H:%M:%S} UTC" if moment else "unknown time"
 
@@ -63,54 +59,81 @@ def _label(view: ActionView) -> str:
     return view.action_type.replace("_", " ")
 
 
+def _first_name(lead: str) -> str:
+    return lead.split(" at ", 1)[0].split()[0] if lead.strip() else "the contact"
+
+
+def _company(lead: str) -> str:
+    return lead.split(" at ", 1)[1] if " at " in lead else lead
+
+
+def _chunks(text: str, size: int = 1800) -> list[str]:
+    return [text[i:i + size] for i in range(0, len(text), size)] or [""]
+
+
 def render(view: ActionView) -> tuple[str, list[dict[str, Any]]]:
-    """(fallback text, blocks) for the action in its current state."""
+    """(fallback text, blocks) for the action in its current state.
+
+    Layout, so the button is never lost: a one-line header, the buttons directly under it, a compact
+    summary, the details in small print, and the same buttons again at the very bottom."""
     state = _state(view)
-    head = {"pending": f":hourglass_flowing_sand: {_label(view)} to *{view.lead}*",
-            "awaiting_approval": f":raised_hand: Approval needed: {_label(view)} to *{view.lead}*",
-            "approved": f":outbox_tray: Sending: {_label(view)} to *{view.lead}*",
-            "sent": f":white_check_mark: Sent: {_label(view)} to *{view.lead}*",
-            "cancelled": f":no_entry_sign: Cancelled: {_label(view)} to *{view.lead}*",
-            "rejected": f":no_entry_sign: Rejected: {_label(view)} to *{view.lead}*",
-            "blocked": f":stop_sign: Blocked: {_label(view)} to *{view.lead}*",
-            "failed": f":warning: Failed: {_label(view)} to *{view.lead}*"}[state]
-    blocks: list[dict[str, Any]] = [{"type": "section", "text": _text(head)}]
+    who, company = _first_name(view.lead), _company(view.lead)
+    what = _label(view)
+    secs = view.seconds_left if view.seconds_left is not None else 60
+    head = {"pending": f":hourglass_flowing_sand: *Sending to {who} at {company} in {secs} seconds*",
+            "awaiting_approval": f":raised_hand: *Approval needed: {what} to {who} at {company}*",
+            "approved": f":outbox_tray: *Sending {what} to {who} at {company} now*",
+            "sent": f":white_check_mark: *Sent {_clock(view.sent_at)}: {what} to {who} at {company}*",
+            "cancelled": f":no_entry_sign: *Cancelled by {_who(view.decision_by)} at "
+                         f"{_clock(view.decided_at)}: {what} to {who} at {company}*",
+            "rejected": f":no_entry_sign: *Rejected by {_who(view.decision_by)} at "
+                        f"{_clock(view.decided_at)}: {what} to {who} at {company}*",
+            "blocked": f":stop_sign: *Blocked: {view.hold_reason or 'blocked by policy'}* "
+                       f"({what} to {who} at {company})",
+            "failed": f":warning: *Failed: {what} to {who} at {company}*"}[state]
+    buttons = {"pending": [("Cancel", ACTION_CANCEL, "danger")],
+               "awaiting_approval": [("Approve", ACTION_APPROVE, "primary"),
+                                     ("Reject", ACTION_REJECT, "danger")]}.get(state, [])
 
+    def actions(block_id: str) -> dict[str, Any]:
+        return {"type": "actions", "block_id": block_id, "elements": [
+            _button(label, action, view.action_id, style=style) for label, action, style in buttons]}
+
+    blocks: list[dict[str, Any]] = [{"type": "section", "block_id": "head", "text": _text(head)}]
+    if buttons:
+        blocks.append(actions("buttons_top"))
+
+    top_reason = next((ln.strip() for ln in (view.score_reason or "").splitlines()[1:] if ln.strip()), "")
+    score = f"*Tier {view.tier} · {view.total_score}/100*" if view.tier else "*Not scored*"
+    summary = [score + (f" — {top_reason}" if top_reason else ""), f"*Subject:* {view.subject or '(none)'}"]
+    if view.case_study:
+        summary.append(f"*Case study:* {view.case_study}")
     if state == "blocked":
-        reason = view.hold_reason or "blocked by policy"
-        blocks.append({"type": "section", "text": _text(
-            f"*Blocked: {reason}*\nThis cannot be approved or overridden from Slack. "
-            "A person has to fix the cause.")})
-    score = f"{view.total_score}/100, tier {view.tier}" if view.tier else "not scored"
-    blocks.append(_fields(("Score", score),
-                          ("Case study", view.case_study or "none"),
-                          ("Lessons cited", ", ".join(f"L{i}" for i in view.lesson_ids) or "none"),
-                          ("Claim check", view.claim_check or "no claims made")))
-    blocks.append({"type": "section", "text": _text(f"*Why this lead* (written reason)\n{_reasons(view)}")})
-    if view.subject or view.body:
-        preview = (view.body or "")[:BODY_PREVIEW] + ("…" if len(view.body or "") > BODY_PREVIEW else "")
-        blocks.append({"type": "section", "text": _text(
-            f"*Subject:* {view.subject or '(none)'}\n```{preview}```")})
+        summary.insert(0, "This cannot be approved or overridden from Slack; a person has to fix the cause.")
+    blocks.append({"type": "section", "block_id": "summary", "text": _text("\n".join(summary))})
 
-    note = {"pending": f"Sends in *{view.seconds_left if view.seconds_left is not None else 60} seconds* "
-                       "unless someone cancels it.",
-            "awaiting_approval": "Nothing is sent until someone approves it.",
-            "approved": "Approved. Sending now.",
-            "sent": f"Sent {_clock(view.sent_at)}.",
-            "cancelled": f"Cancelled by {_who(view.decision_by)} at {_clock(view.decided_at)}.",
-            "rejected": f"Rejected by {_who(view.decision_by)} at {_clock(view.decided_at)}.",
-            "blocked": "", "failed": "The send failed; see `revos trace`."}[state]
-    if note:
-        blocks.append({"type": "context", "elements": [_text(note)]})
+    small = [f"Lessons cited: {', '.join(f'L{i}' for i in view.lesson_ids) or 'none'}",
+             f"Claim check: {view.claim_check or 'no claims made'}"]
+    if state == "approved":
+        small.append("Approved. Sending now.")
+    elif state == "failed":
+        small.append("The send failed; see `revos trace`.")
+    blocks.append({"type": "context", "block_id": "facts", "elements": [_text(" · ".join(small))]})
 
-    if state == "pending":
-        blocks.append({"type": "actions", "elements": [_button("Cancel", ACTION_CANCEL, view.action_id,
-                                                              style="danger")]})
-    elif state == "awaiting_approval":
-        blocks.append({"type": "actions", "elements": [
-            _button("Approve", ACTION_APPROVE, view.action_id, style="primary"),
-            _button("Reject", ACTION_REJECT, view.action_id, style="danger")]})
-    return head.replace("*", "").replace(":", "")[:150], blocks
+    detail = f"*Why this lead (written reason)*\n{_reasons(view)}"
+    if view.body:
+        preview = view.body[:BODY_PREVIEW] + ("…" if len(view.body) > BODY_PREVIEW else "")
+        detail += f"\n*Draft*\n{preview}"
+    blocks.append({"type": "context", "block_id": "details",
+                   "elements": [_text(chunk) for chunk in _chunks(detail)[:3]]})
+
+    if buttons:
+        blocks.append(actions("buttons_bottom"))        # the same buttons again, reachable without scrolling
+    fallback = head.replace("*", "")
+    for token in (":hourglass_flowing_sand: ", ":raised_hand: ", ":outbox_tray: ", ":white_check_mark: ",
+                  ":no_entry_sign: ", ":stop_sign: ", ":warning: "):
+        fallback = fallback.replace(token, "")
+    return fallback[:150], blocks
 
 
 def _button(label: str, action_id: str, value: str, *, style: str) -> dict[str, Any]:

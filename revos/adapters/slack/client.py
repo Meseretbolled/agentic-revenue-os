@@ -74,7 +74,8 @@ class SlackAdapter:
         raise SlackUnavailable(method, reason)
 
     def post(self, channel: str, text: str, blocks: Blocks) -> Posted:
-        data = self._call("chat.postMessage", {"channel": channel, "text": text, "blocks": list(blocks)})
+        data = self._call("chat.postMessage", {"channel": channel, "text": text, "blocks": list(blocks),
+                                               "unfurl_links": False, "unfurl_media": False})
         return Posted(str(data.get("channel", channel)), str(data["ts"]))
 
     def update(self, channel: str, ts: str, text: str, blocks: Blocks) -> None:

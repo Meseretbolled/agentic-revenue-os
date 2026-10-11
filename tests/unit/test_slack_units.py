@@ -45,7 +45,8 @@ def test_post_update_and_ephemeral_use_the_right_methods_and_never_show_the_toke
     assert (posted.channel, posted.ts) == ("C123", "1.2")                  # the channel ID, for updating
     assert [p for p, _, _ in api.requests] == ["/api/chat.postMessage", "/api/chat.update",
                                               "/api/chat.postEphemeral"]
-    assert api.requests[0][1] == {"channel": "#revops", "text": "hi", "blocks": [{"type": "divider"}]}
+    assert api.requests[0][1] == {"channel": "#revops", "text": "hi", "blocks": [{"type": "divider"}],
+                                  "unfurl_links": False, "unfurl_media": False}      # no link previews
     assert api.requests[1][1]["ts"] == "1.2" and api.requests[2][1] == {"channel": "C123", "user": "U1",
                                                                          "text": "psst"}
     assert all(h["authorization"] == f"Bearer {TOKEN}" for _, _, h in api.requests)
@@ -135,8 +136,8 @@ def buttons(blocks):
 
 def test_each_state_shows_the_right_buttons_and_words() -> None:
     cases = {
-        "pending": (view(), ["Cancel"], "Sends in *42 seconds*"),
-        "awaiting": (view(status="awaiting_approval"), ["Approve", "Reject"], "Nothing is sent until"),
+        "pending": (view(), ["Cancel", "Cancel"], "in 42 seconds"),
+        "awaiting": (view(status="awaiting_approval"), ["Approve", "Reject"] * 2, "Approval needed"),
         "sent": (view(status="sent", sent_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)), [],
                  "Sent 2026-01-02 03:04:05 UTC"),
         "cancelled": (view(status="cancelled", decision="vetoed", decision_by="slack:U9",

@@ -264,6 +264,7 @@ def run(
     force: bool = typer.Option(False, "--force", help="start even if a REAL service fails its check"),
 ) -> None:
     """Start the API, the worker and the scheduler together. Ctrl-C stops them cleanly."""
+    import os
     import signal
     import threading
 
@@ -305,7 +306,9 @@ def run(
                    "switch still apply.")
         log("run", DOMAIN_CAP_BANNER, level="warning")
 
-    failed = [c for c in results.values() if c.status == FAILED
+    # The tunnel points at the API this command is about to start, so it cannot pass beforehand: it is
+    # re-checked once the API is up (and only ever costs the Slack buttons, never safety).
+    failed = [c for c in results.values() if c.status == FAILED and c.service != "Tunnel URL"
               and any(m.service == c.service and m.mode == REAL for m in modes)]
     for check in failed:
         log("run", f"{check.service} will run as REAL but its check failed", level="error",
@@ -326,6 +329,18 @@ def run(
         signal.signal(sig, lambda *_: stop.set())
     supervisor.start()
     typer.echo("running. Ctrl-C to stop.")
+    if any(m.service == "Tunnel URL" and m.mode == REAL for m in modes):
+        import time
+
+        import httpx
+
+        from revos.doctor import check_tunnel
+        time.sleep(2)                                   # let the API come up
+        tunnel = check_tunnel(dict(os.environ), httpx.Client())
+        typer.echo(f"  {tunnel.line()}" + ("" if tunnel.status == "REAL OK"
+                                           else "  (Slack buttons will not work until it answers)"))
+        if tunnel.status == FAILED:
+            log("run", "the tunnel does not answer /healthz", level="warning", detail=tunnel.detail)
     while not stop.is_set() and not supervisor.stop_event.is_set():
         stop.wait(0.5)
     typer.echo("stopping: finishing the current job...")

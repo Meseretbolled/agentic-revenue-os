@@ -1,5 +1,6 @@
 """Slack: the veto message, the signed interactions endpoint, approval buttons, and the digest."""
 
+import json
 import threading
 from datetime import timedelta
 
@@ -33,20 +34,42 @@ def sent_count(conn) -> int:
 
 # --- 1. what is posted ----------------------------------------------------------------------------------------
 
-def test_an_auto_with_veto_action_is_posted_with_everything_a_person_needs(s):
+def action_blocks(post):
+    return [(n, [e["text"]["text"] for e in b["elements"]]) for n, b in enumerate(post.blocks)
+            if b["type"] == "actions"]
+
+
+def test_an_auto_with_veto_action_is_posted_with_a_short_header_and_the_button_right_under_it(s):
     action = s.hot_first_touch()
     s.drain()
     (post,) = s.slack.posts
     body = text_of(post)
-    assert post.channel == CHANNEL and "Maya Ortiz at Harborview Optical Collective" in body
-    assert CONTACT_EMAIL not in body and "@" not in body.replace("<@", "")          # the lead, not the address
-    assert "83/100, tier A" in body and "Why this lead" in body and "[fit]" in body    # score and written reason
-    assert "Pearle Vision (public testimonial)" in body                                # the case study
-    assert "Lessons cited" in body and "Claim check" in body and "claim" in body.lower()
-    assert "Subject:" in body and "Scaling local campaigns" in body
-    assert "Sends in *60 seconds*" in body
-    buttons = s.slack.buttons(post.ts)
-    assert [b["text"]["text"] for b in buttons] == ["Cancel"] and buttons[0]["value"] == str(action)
+    header = post.blocks[0]["text"]["text"]
+    assert post.channel == CHANNEL
+    assert "Sending to Maya at Harborview Optical Collective in 60 seconds" in header and len(header) < 120
+    assert post.blocks[1]["type"] == "actions"                        # the button directly under the header
+    assert action_blocks(post)[0] == (1, ["Cancel"])
+    assert post.blocks[1]["elements"][0]["value"] == str(action)
+    assert CONTACT_EMAIL not in body and "@" not in body.replace("<@", "")         # the lead, not the address
+    # compact summary right below: tier, score, the top reason, subject, case study
+    summary = post.blocks[2]["text"]["text"]
+    assert "Tier A · 83/100" in summary and "Subject:" in summary and "Scaling local campaigns" in summary
+    assert "Pearle Vision (public testimonial)" in summary and "[fit]" in summary
+    # the detail is under the button, in small print
+    assert any(b["type"] == "context" and "Why this lead" in json.dumps(b) and "Draft" in json.dumps(b)
+               for b in post.blocks[3:])
+    assert "Lessons cited" in body and "Claim check" in body
+    # the same button again at the very bottom, and nowhere else
+    assert [n for n, _ in action_blocks(post)] == [1, len(post.blocks) - 1]
+    assert all(t == ["Cancel"] for _, t in action_blocks(post))
+    assert len(post.blocks) <= 7
+
+
+def test_the_cancel_button_is_in_the_first_two_blocks_for_every_veto_message(s):
+    s.hot_first_touch()
+    s.drain()
+    (post,) = s.slack.posts
+    assert any(b["type"] == "actions" for b in post.blocks[:2])
 
 
 def test_the_message_is_updated_in_place_to_sent_with_the_time(s):
@@ -56,7 +79,7 @@ def test_the_message_is_updated_in_place_to_sent_with_the_time(s):
     assert sent_count(s.conn) == 1
     (post,) = s.slack.posts                                    # still one message
     body = text_of(post)
-    assert "Sent: first touch" in body and "Sent 2026-10-12 09:01" in body
+    assert "Sent 2026-10-12 09:01" in body and "first touch to Maya at Harborview" in body
     assert s.slack.buttons(post.ts) == [] and len(s.slack.updates) >= 1
 
 
@@ -297,14 +320,15 @@ def test_approval_mode_posts_approve_and_reject_and_the_buttons_work(conn, ro_co
     action = s.hot_first_touch()
     s.drain()
     (post,) = s.slack.posts
-    assert [b["text"]["text"] for b in s.slack.buttons(post.ts)] == ["Approve", "Reject"]
+    assert action_blocks(post)[0][1] == ["Approve", "Reject"] and post.blocks[1]["type"] == "actions"
+    assert [t for _, t in action_blocks(post)] == [["Approve", "Reject"]] * 2      # top and bottom
     assert "Approval needed" in text_of(post) and status(conn, action)[0] == "awaiting_approval"
     s.drain(300)
     assert sent_count(conn) == 0                                  # nothing sends without a person
     response, _ = s.press("approve", action, user="UBOSS")
     assert response.status_code == 200 and status(conn, action) == ("approved", "approved", "slack:UBOSS")
     s.drain()
-    assert sent_count(conn) == 1 and "Sent:" in text_of(s.post_for(action))
+    assert sent_count(conn) == 1 and "Sent 2026" in text_of(s.post_for(action))
 
 
 def test_reject_in_slack_cancels_for_good(conn, ro_conn, pack, clock, test_db_url):
