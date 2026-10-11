@@ -102,8 +102,9 @@ class FakeLLM:
         for label, needles in _REPLY_RULES:
             hit = next((n for n in needles if n in text), None)
             if hit:
+                quote = quote_around(fresh, hit)
                 return ReplyClassification(label, 0.9, f"matched '{hit}'",  # type: ignore[arg-type]
-                                           quote_around(fresh, hit))
+                                           quote, quote_verified=bool(quote))
         return ReplyClassification("question", 0.3, "no rule matched")
 
     def extract_call_fields(self, transcript: UntrustedText, wanted: Sequence[str]) -> CallExtraction:

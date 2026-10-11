@@ -18,6 +18,7 @@ class ReplyClassification:
     confidence: float
     rationale: str
     quote: str = ""            # the words in the reply that justify the label
+    quote_verified: bool = False       # code checked that the quote really is in the reply
 
 
 @dataclass(frozen=True)

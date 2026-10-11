@@ -202,3 +202,37 @@ def test_rules_passing_alone_is_not_enough_when_there_are_claims() -> None:
 def test_a_draft_with_no_personal_claims_needs_no_verifier() -> None:
     plain = draft("Hi Sam, would a short call be useful?")
     assert check_draft(plain, EV, APPROVED, NAMES, None).passed
+
+
+# --- words that are capitalised only because they start a sentence (seen in live drafts) -----------------------
+
+@pytest.mark.parametrize("text", [
+    "Running 85 locations is hard.", "Per the profile, there are 85 sites.", "Across that many sites, brand matters.",
+    "Hi Sam. Keeping local campaigns on brand is work.", "Managing every site takes effort.",
+])
+def test_a_sentence_opening_word_is_not_a_proper_noun(text) -> None:
+    assert not [k for k in kinds(text) if k[0] == "name" and k[1] in
+                {"running", "per", "across", "keeping", "managing"}]
+
+
+@pytest.mark.parametrize("text,name", [
+    ("Nike saw strong growth last year.", "nike"),                       # an unlisted opener stays a name
+    ("Hi Sam. Walmart is a customer.", "walmart"),
+    ("We work with Running Shoes Inc daily.", "running"),                # mid-sentence: a name
+    ("Running Shoes Inc is a customer.", "running"),                     # followed by a capital: a name
+    ("Like Nike, we grow.", "nike"),
+])
+def test_a_real_name_is_still_a_fact_to_check(text, name) -> None:
+    assert ("name", name) in kinds(text)
+
+
+def test_an_undeclared_name_after_an_opener_is_still_caught() -> None:
+    result = deterministic_check(draft("Running locations is hard, as Walmart knows."), EV, APPROVED, NAMES)
+    assert any(i.code == "undeclared_fact" and "Walmart" in i.message for i in result)
+    assert not any("Running" in i.message for i in result)
+
+
+def test_a_paragraph_that_starts_with_an_opener_after_the_greeting_is_fine() -> None:
+    body = "Hi Sam,\n\nRunning 120 locations across Texas takes work.\n\nWould a short call be useful?"
+    result = deterministic_check(draft(body, Claim("120 locations across Texas", ("F1",))), EV, APPROVED, NAMES)
+    assert not [i for i in result if "Running" in i.message]

@@ -66,6 +66,20 @@ def _failure(subtype: str | None, detail: str) -> LLMError:
     return LLMError(f"the SDK run failed ({subtype or 'unknown'}): {detail}"[:300])
 
 
+def _tokens(message: Any) -> tuple[int, int]:
+    """(tokens in, tokens out) for the whole run. `model_usage` is the SDK's per-model total that its cost is
+    computed from (input includes cache reads and writes); `usage` is the fallback."""
+    per_model = getattr(message, "model_usage", None) or {}
+    if per_model:
+        return (sum(int(m.get("inputTokens") or 0) + int(m.get("cacheReadInputTokens") or 0)
+                    + int(m.get("cacheCreationInputTokens") or 0) for m in per_model.values()),
+                sum(int(m.get("outputTokens") or 0) for m in per_model.values()))
+    usage = getattr(message, "usage", None) or {}
+    return (sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                  "cache_read_input_tokens")),
+            int(usage.get("output_tokens") or 0))
+
+
 async def _collect(stream: Stream, options: ClaudeAgentOptions, prompt: str) -> SdkResult:
     tools: list[str] = []
     model: str | None = None
@@ -76,9 +90,8 @@ async def _collect(stream: Stream, options: ClaudeAgentOptions, prompt: str) -> 
         elif isinstance(message, sdk.ResultMessage):
             if message.is_error or message.subtype != "success" or message.result is None:
                 raise _failure(message.subtype, "; ".join(message.errors or []))
-            usage = message.usage or {}
-            return SdkResult(message.result, message.total_cost_usd,
-                             int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0)),
+            tokens_in, tokens_out = _tokens(message)
+            return SdkResult(message.result, message.total_cost_usd, tokens_in, tokens_out,
                              model, tuple(tools), message.num_turns)
     raise LLMError("the SDK run ended without a result")
 
@@ -122,7 +135,7 @@ class SdkJudge:
         except Exception as exc:
             self._ledger.fail(entry)
             raise LLMError(f"{type(exc).__name__}: {exc}"[:300]) from exc
-        self._ledger.settle(entry, result.cost_usd)
+        self._ledger.settle(entry, result.cost_usd, result.input_tokens, result.output_tokens)
         self.results.append(result)
         if self._broker.tripped:                  # a loop limit fired inside the SDK run
             raise LoopLimitExceeded(self._broker.tripped)

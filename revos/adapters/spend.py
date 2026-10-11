@@ -45,11 +45,20 @@ class SpendLedger:
         others = self.spent_usd() - self.reserve_per_call_usd
         return max(0.0, self.max_spend_usd - others)
 
-    def settle(self, entry: int, cost_usd: float | None) -> float:
+    def settle(self, entry: int, cost_usd: float | None, input_tokens: int | None = None,
+               output_tokens: int | None = None) -> float:
         cost = cost_usd if cost_usd is not None else self.reserve_per_call_usd
-        self._conn.execute("UPDATE llm_spend SET status = 'settled', cost_usd = %s WHERE id = %s",
-                           (cost, entry))
+        self._conn.execute("UPDATE llm_spend SET status = 'settled', cost_usd = %s, input_tokens = %s, "
+                           "output_tokens = %s WHERE id = %s", (cost, input_tokens, output_tokens, entry))
         return cost
+
+    def summary(self) -> dict[str, float | int]:
+        """Settled calls so far: how many, tokens in and out, dollars. For the doctor and the reports."""
+        row = self._conn.execute(
+            "SELECT count(*), coalesce(sum(input_tokens), 0), coalesce(sum(output_tokens), 0), "
+            "coalesce(sum(cost_usd), 0) FROM llm_spend WHERE status = 'settled'").fetchone()
+        return {"calls": int(row[0]), "tokens_in": int(row[1]), "tokens_out": int(row[2]),
+                "usd": float(row[3])}
 
     def fail(self, entry: int) -> None:
         self._conn.execute("UPDATE llm_spend SET status = 'failed', cost_usd = 0 WHERE id = %s",

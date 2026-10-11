@@ -436,3 +436,14 @@ the terms from the call fields and the pack's SAMPLE rate card, then `validate_i
 - **A person** is involved only when a term falls outside the pack's limits (`io.terms_need_a_person` audit).
 - `revos io-terms` stays as an override; it is audited as `deal.io_terms_set` with source `override` (planner: `auto`)
   and the planner never replaces terms already set.
+
+## Live model checks (LLM_MODE=live)
+
+- `scripts/sdk_smoke.py`: one Outreach agent call through the Agent SDK with its scoped tools (cap `SMOKE_MAX_USD`).
+- `scripts/live_draft.py`: one first-touch draft with the claim checks (cap `LIVE_DRAFT_MAX_USD`).
+- `scripts/live_check.py`: replies (interested, objection, two injections), extraction from the Harborview call with the
+  exact-quote check, and a first-touch draft; every call listed with model, tokens, cost and running total (cap
+  `LIVE_CHECK_MAX_USD`, default $0.50).
+- `make live-llm`: one whole lead with the real model against the mock mail, CRM and e-sign adapters (cap
+  `LIVE_LEAD_MAX_USD`). Measured about $0.05 a lead.
+- `revos doctor` prints an `LLM spend` line: calls, tokens in/out and dollars against `LLM_MAX_SPEND_USD`.

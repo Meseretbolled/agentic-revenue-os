@@ -11,7 +11,7 @@ SpendCapExceeded is raised. Any ledger problem also blocks the call.
 
 import os
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import psycopg
@@ -53,6 +53,8 @@ _UNTRUSTED_NOTE = (
 class CallResult:
     text: str
     cost_usd: float | None      # None when the SDK did not report a cost
+    input_tokens: int | None = None      # includes cache reads and writes
+    output_tokens: int | None = None
 
 
 Transport = Callable[[str, str, str, float], CallResult]   # (model, system, prompt, budget_usd)
@@ -88,7 +90,9 @@ def sdk_transport(model: str, system: str, prompt: str, budget_usd: float) -> Ca
             if isinstance(message, ResultMessage):
                 if message.is_error or message.result is None:
                     raise LLMError(f"model call failed: {message.subtype}")
-                return CallResult(message.result, message.total_cost_usd)
+                from revos.agents.sdk import _tokens  # the one place that reads a result's token counts
+                tokens_in, tokens_out = _tokens(message)
+                return CallResult(message.result, message.total_cost_usd, tokens_in, tokens_out)
         raise LLMError("model call returned no result")
 
     return anyio.run(run)
@@ -114,7 +118,7 @@ class ClaudeLLM:
         except Exception as exc:
             self._ledger.fail(entry)
             raise LLMError(f"{type(exc).__name__}: {exc}") from exc
-        self._ledger.settle(entry, result.cost_usd)
+        self._ledger.settle(entry, result.cost_usd, result.input_tokens, result.output_tokens)
         return result.text
 
     def _json(self, task: str, model: str, system: str, prompt: str) -> dict[str, Any]:
@@ -122,8 +126,11 @@ class ClaudeLLM:
 
     # --- the port --------------------------------------------------------------------------
     def classify_reply(self, reply: UntrustedText) -> ReplyClassification:
-        return parse_classification(self._json("classify_reply", self._config.model_classify,
-                                               "You classify sales replies.", classify_prompt(reply)))
+        result = parse_classification(self._json("classify_reply", self._config.model_classify,
+                                                 "You classify sales replies.", classify_prompt(reply)))
+        # the model's evidence is only kept if it really is in the reply (code checks, not the model)
+        verified = bool(result.quote) and reply.contains_quote(result.quote)
+        return replace(result, quote=result.quote if verified else "", quote_verified=verified)
 
     def extract_call_fields(self, transcript: UntrustedText, wanted: Sequence[str]) -> CallExtraction:
         return parse_extraction(self._json("extract_call_fields", self._config.model_drafting,

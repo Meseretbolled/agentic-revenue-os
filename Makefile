@@ -1,4 +1,4 @@
-.PHONY: setup lint test verify db-up db-down demo live-hubspot live-gmail
+.PHONY: setup lint test verify db-up db-down demo live-hubspot live-gmail live-llm
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -30,6 +30,9 @@ demo: db-up
 
 # Real HubSpot, real credentials from .env. Creates and removes ONE fictional contact and deal.
 # Not part of `make verify`.
+live-llm: db-up
+	$(PY) -m pytest -m live tests/live/test_llm_live.py -s -v
+
 live-hubspot: db-up
 	$(VENV)/bin/revos hubspot-setup
 	$(PY) -m pytest -m live tests/live/test_hubspot_live.py -v

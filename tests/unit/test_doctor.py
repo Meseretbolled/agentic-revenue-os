@@ -239,11 +239,33 @@ def test_the_command_prints_one_line_per_service_and_exits_1_on_a_failure(monkey
                                                        Check("Slack", MOCK, "key missing")])
     result = CliRunner().invoke(app, ["doctor"])
     assert result.exit_code == 1
-    first, second, third, fourth = result.output.splitlines()
+    first, second, spend, third, fourth = result.output.splitlines()
+    assert spend.startswith("LLM spend") and "no model calls" in spend
     assert first.startswith("HubSpot       REAL FAILED  (auth, status 401)") and "will run as: " in first
     assert second.startswith("Slack         MOCK  (key missing)") and third.startswith("Send window") and fourth.startswith("Domain cap")
     monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Slack", OK)])
     assert CliRunner().invoke(app, ["doctor"]).exit_code == 0
+
+
+def test_the_spend_line_reports_calls_tokens_and_dollars_against_the_cap() -> None:
+    class Ledger:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        autocommit = True
+
+        def execute(self, sql, params=None):
+            class R:
+                @staticmethod
+                def fetchone():
+                    return (3, 12000, 800, 0.0412)
+            return R()
+    line = doctor.spend_line({"LLM_MODE": "live", "LLM_MAX_SPEND_USD": "3.00"}, lambda: Ledger())
+    assert line == "3 calls, 12,000 tokens in / 800 out, $0.0412 of $3.00 cap (1.4%)"
+    assert "no model calls" in doctor.spend_line({"LLM_MODE": "fake"}, lambda: Ledger())
 
 
 def test_the_env_loader_fills_gaps_never_overrides_and_reports_only_a_count(tmp_path, monkeypatch) -> None:

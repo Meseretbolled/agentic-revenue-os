@@ -67,6 +67,21 @@ def check_llm(env: Mapping[str, str], connect: Callable[[], psycopg.Connection])
     return Check("LLM budget", OK, f"${spent:.2f} of ${cap:.2f} used; the model was not called")
 
 
+def spend_line(env: Mapping[str, str], connect: Callable[[], psycopg.Connection]) -> str:
+    """One doctor line: calls, tokens, dollars against the cap. Reads the ledger; never calls a model."""
+    if env.get("LLM_MODE", "fake") != "live":
+        return "no model calls (LLM_MODE is fake)"
+    cap = float(env.get("LLM_MAX_SPEND_USD", "3.00"))
+    try:
+        with connect() as conn:
+            conn.autocommit = True
+            done = SpendLedger(conn, cap, 0.05).summary()
+    except psycopg.Error:
+        return "ledger unavailable (run `revos run` once to apply migrations)"
+    return (f"{done['calls']} calls, {done['tokens_in']:,} tokens in / {done['tokens_out']:,} out, "
+            f"${done['usd']:.4f} of ${cap:.2f} cap ({done['usd'] / cap:.1%})")
+
+
 def probe_hubspot(env: Mapping[str, str], http: httpx.Client) -> Check:
     """FIRST question: does the service key work as a normal Bearer token on the contacts API?
     If the configured base URL answers 401, 403 or 404, try the other one."""

@@ -53,6 +53,15 @@ saw noticed read looking given since this that these those there here if when wh
 me let just following quick question next last today tomorrow monday tuesday wednesday thursday friday
 saturday sunday re fwd great sure hope hoping appreciate congrats""".split())
 
+# Words that start a sentence and are capitalised only because they start it (live drafts opened with
+# "Running ...", "Per ...", "Across ..."). Only a sentence-initial word followed by a lowercase word can be
+# exempt: a name mid-sentence, a multi-word name or an unlisted opener ("Nike saw ...") is still a fact.
+OPENERS = frozenset("""per across with without within given since about among over under after before during
+between beyond through around against toward towards despite for from into onto upon while whether because
+although though many most some each every both several any all few more less another other such
+being having making keeping running managing scaling growing building maintaining ensuring""".split())
+_SENTENCE_START = re.compile(r"(?:^|[.!?:]\s+|\n\s*)$")
+
 Fact = tuple[str, str]      # (kind, normalised value)
 
 
@@ -72,6 +81,17 @@ def _number_key(m: re.Match[str]) -> str:
     num = num.lstrip("0") or "0"
     return ((m.group("cur") or "") + num + (m.group("suffix") or "").lower()
             + ("%" if m.group("pct") else ""))
+
+
+def _ordinary_opener(text: str, m: re.Match[str], low: str) -> bool:
+    """A capitalised word that only starts a sentence: a listed opener or an -ing word, then a lowercase word
+    or a number."""
+    if not _SENTENCE_START.search(text[:m.start()]):
+        return False
+    following = text[m.end():m.end() + 40].lstrip()
+    if not (following[:1].islower() or following[:1].isdigit()):
+        return False                                    # "Running Shoes Inc" or a lone word: keep checking
+    return low in OPENERS or (low.endswith("ing") and len(low) > 5)
 
 
 def extract_tokens(text: str) -> list[Token]:
@@ -97,6 +117,7 @@ def extract_tokens(text: str) -> list[Token]:
             tokens.append(Token("number", str(sum(int(_WORD_NUMBERS[p]) for p in low.split("-"))),
                                 m.start(), m.end(), word))
         elif word[0].isupper() and low not in COMMON and low not in _MONTHS \
+                and not _ordinary_opener(text, m, low) \
                 and not any(s <= m.start() < e for s, e in covered):
             tokens.append(Token("name", low, m.start(), m.end(), word))
     return sorted(tokens, key=lambda t: t.start)
@@ -134,7 +155,8 @@ def deterministic_check(
     allowed_names: Sequence[str],
 ) -> list[Issue]:
     issues: list[Issue] = []
-    text = " ".join(f"{draft.subject}\n{draft.body}".split())
+    # whitespace is normalised inside each line; line breaks stay, so a paragraph start is a sentence start
+    text = "\n".join(" ".join(line.split()) for line in f"{draft.subject}\n{draft.body}".splitlines())
     approved = facts_in(*approved_texts, *allowed_names)
     known_names = {t.key for n in allowed_names for t in extract_tokens(n) if t.kind == "name"}
     known_names |= {w.casefold() for n in allowed_names for w in _WORD.findall(n)}

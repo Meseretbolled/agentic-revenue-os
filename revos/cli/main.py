@@ -223,7 +223,10 @@ def call_demo() -> None:
 def doctor() -> None:
     """One status per service: REAL OK, REAL FAILED (with a reason category) or MOCK, and what it
     will run as. No values."""
-    from revos.doctor import FAILED, run_checks
+    import os
+
+    from revos.db import connect as open_db
+    from revos.doctor import FAILED, run_checks, spend_line
     from revos.env import load_env_file
     from revos.modes import integration_modes
     from revos.policy.config import (
@@ -247,6 +250,7 @@ def doctor() -> None:
             typer.echo(f"{check.line():<50} will run as: {mode.mode}")
         else:
             typer.echo(mode.line_with(check.status, check.detail))
+    typer.echo(f"{'LLM spend':<14}{spend_line(os.environ, open_db)}")
     typer.echo(f"{'Send window':<14}" + (BYPASS_BANNER if bypass else "enforced (the pack's weekday hours)"))
     typer.echo(f"{'Domain cap':<14}"
                + (DOMAIN_CAP_BANNER if cap_bypass else "enforced (the pack's per-domain cap)"))
