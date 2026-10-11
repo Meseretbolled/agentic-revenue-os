@@ -177,7 +177,7 @@ def run_demo(url: str, out: Callable[[str], None] = print) -> DemoReport:
         result = reply("Sounds good, let's talk next week", "r1")
         drain()
         n.say(f"reply routed as: {result.label}; times offered:")
-        n.say(world.mailer.sent[-1].body.split("Times that work on our side:")[1].split("\n\n")[0].strip())
+        n.say(world.mailer.sent[-1].body.split("\n\n")[2].strip())
         n.record()
 
         # 3 ------------------------------------------------------------------------------------

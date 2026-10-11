@@ -60,14 +60,19 @@ def parse_extraction(data: dict[str, Any]) -> CallExtraction:
 
 
 def draft_prompt(request: DraftRequest) -> str:
-    evidence = "\n".join(f"{i.id}: {i.text}" for i in request.evidence.items.values())
+    evidence = "\n".join(f"{i.id}: {i.text}" + (f" [FICTIONAL DEMO FACT, source: {i.source_url}]"
+                                               if i.demo else "")
+                         for i in request.evidence.items.values())
+    demo_rule = ("\nA fact marked FICTIONAL DEMO FACT must be written with its source label in the "
+                 "line and never presented as something you read or researched."
+                 if any(i.demo for i in request.evidence.items.values()) else "")
     feedback = ("\nFix these problems from the last attempt:\n- " + "\n- ".join(request.feedback)
                 if request.feedback else "")
     angle = (f"\nLead with this angle, as an angle only (never as a new fact): "
              f"{request.context['angle']}" if request.context.get("angle") else "")
     return (f"Write ONE short personalised line for {request.context.get('first_name', 'the contact')} "
             f"at {request.context.get('company', 'their company')}. Use only facts from the evidence "
-            f"below; do not add numbers, dates or names that are not in it.{angle}\n"
+            f"below; do not add numbers, dates or names that are not in it.{angle}{demo_rule}\n"
             f"Evidence:\n{evidence}{feedback}\n"
             'Return {"personalised_line": str, "claims": [{"text": exact words from the line, '
             '"evidence": [ids]}]}')

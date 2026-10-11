@@ -28,12 +28,17 @@ def lead_facts(fields: Mapping[str, Any], pack: Pack) -> dict[str, Any]:
     return {k: v for k, v in clean_fields(fields).items() if k in pack.scoring.lead_fields}
 
 
+DEMO_FACT_PREFIX = "DEMO"          # fact ids that come from a fictional demo profile, never from a page
+DEMO_SOURCE_PREFIX = "fictional demo profile"
+
+
 def evidence_from_fields(fields: Mapping[str, Any]) -> Evidence:
     """Researched facts are stored as fact:<id> (the sentence) and fact_source:<id> (the page)."""
     plain = clean_fields(fields)
     ids = sorted((k.split(":", 1)[1] for k in plain if k.startswith("fact:")),
-                 key=lambda i: (len(i), i))
-    return Evidence.of(EvidenceItem(i, plain[f"fact:{i}"], plain.get(f"fact_source:{i}")) for i in ids)
+                 key=lambda i: (i.startswith(DEMO_FACT_PREFIX), len(i), i))    # real research comes first
+    return Evidence.of(EvidenceItem(i, plain[f"fact:{i}"], plain.get(f"fact_source:{i}"),
+                                    demo=i.startswith(DEMO_FACT_PREFIX)) for i in ids)
 
 
 def match_tags(fields: Mapping[str, Any]) -> list[str]:
@@ -54,7 +59,8 @@ def check_inputs(pack: Pack, template: EmailTemplate, identity: Identity, compan
     """(approved texts, known names) for the claim checker. Shared by the agent that drafts and
     by the orchestrator that re-checks, so both judge against the same inputs."""
     approved = [template.subject, template.body,
-                *(f"{p.headline} {p.body}" for p in pack.messaging.pillars), *extra_texts]
+                *(f"{p.headline} {p.body}" for p in pack.messaging.pillars),
+                *pack.messaging.snippets.values(), *extra_texts]
     names = [company, contact_name or "", identity.sender_name, identity.unsubscribe_line,
              identity.postal_address]
     if case_study:

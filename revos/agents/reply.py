@@ -7,7 +7,7 @@ from revos.domain.stages import DealStage
 from revos.skills.dates import return_date
 from revos.skills.drafting import render_case_study_reply, render_fixed
 from revos.skills.inbound import triage_reply
-from revos.skills.slots import match_slot, slot_text
+from revos.skills.slots import match_slot, resolve_tz, slot_label
 
 _STAGE_FOR = {"unsubscribe": DealStage.DO_NOT_CONTACT, "not_interested": DealStage.CLOSED_LOST,
               "out_of_office": None}
@@ -76,12 +76,15 @@ def run(env: AgentEnv) -> AgentOutput:
     elif label == "accept_slot":
         deal = env.tools.call("crm.get_deal", {"deal_id": str(d)})
         offered = [datetime.fromisoformat(s) for s in deal["fields"].get("offered_slots", [])]
-        chosen = match_slot(reply, offered)
+        contact = env.tools.call("crm.get_contact", {"contact_id": str(c)})
+        tz = resolve_tz(contact.get("timezone"))
+        shown = [s.astimezone(tz) if tz else s for s in offered]   # the times as the prospect read them
+        picked = match_slot(reply, shown)
+        chosen = offered[shown.index(picked)] if picked is not None else None
         if chosen is None:
             handoff = "accept_slot: the reply does not match one of the times we offered"
         else:
-            contact = env.tools.call("crm.get_contact", {"contact_id": str(c)})
-            text = slot_text(chosen)
+            text = slot_label(chosen, tz)
             draft = render_fixed(env.pack, "meeting_confirmation", {
                 "first_name": first_name(contact.get("full_name")), "slot_text": text,
                 "sender_name": env.identity.sender_name,

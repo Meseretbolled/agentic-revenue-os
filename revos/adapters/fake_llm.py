@@ -118,7 +118,10 @@ class FakeLLM:
         if not items:
             return DraftProposal("I wanted to reach out about local campaigns.", ())
         first = items[0]
-        line = f"I noticed that {first.text}"
+        if first.demo:           # a fictional profile fact: say where it comes from, never "I noticed"
+            line = f"{first.text} (Source: {first.source_url or 'fictional demo profile'})"
+        else:
+            line = f"I noticed that {first.text}"
         return DraftProposal(line, (_claim(line, first.id),))
 
     def verify_claims(self, draft: Draft, evidence: Evidence) -> Sequence[ClaimVerdict]:

@@ -312,20 +312,24 @@ def seed(
         raise typer.Exit(1)
     email = demo_address(tag)
     fields: dict | None = None
+    timezone: str | None = None
     if profile:
         from revos.seed import PROFILE_NAMES, load_profiles
         if profile not in PROFILE_NAMES:
             typer.echo(f"--profile must be one of {', '.join(PROFILE_NAMES)}", err=True)
             raise typer.Exit(1)
         chosen = load_profiles(segment)[profile]
-        company, domain, contact, fields = (chosen["company"], chosen["domain"], chosen["contact"],
-                                            chosen["fields"])
+        company, domain, contact = chosen["company"], chosen["domain"], chosen["contact"]
+        fields = {**chosen["fields"], **({"research_notes": chosen["research_notes"]}
+                                         if chosen.get("research_notes") else {})}
+        timezone = chosen.get("timezone")
     with connect() as conn:
         conn.autocommit = True
         migrate(conn)
         deal_id, created = seed_one(conn, SystemClock(), segment_id=segment,
                                     pack_version=str(packs[segment].meta.version), company=company,
-                                    domain=domain, contact_name=contact, email=email, fields=fields)
+                                    domain=domain, contact_name=contact, email=email, fields=fields,
+                                    timezone=timezone)
     typer.echo(f"{'seeded' if created else 'already seeded'}: deal {deal_id} for {email}")
 
 

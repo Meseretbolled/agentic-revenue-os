@@ -2,7 +2,8 @@
 
 import re
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from revos.domain.untrusted import UntrustedText
 
@@ -25,6 +26,33 @@ PATTERN = "|".join(
 def slot_text(start: datetime) -> str:
     """How a slot is written in our emails, so a reply can be checked against what we offered."""
     return f"{start:%A %d %B %H:%M} UTC"
+
+
+def resolve_tz(name: str | None) -> ZoneInfo | None:
+    """The contact's time zone, or None if it is missing or not an IANA name (never a guess)."""
+    if not name or not name.strip():
+        return None
+    try:
+        return ZoneInfo(name.strip())
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def _offset(moment: datetime) -> str:
+    delta = moment.utcoffset() or timedelta(0)
+    minutes = int(delta.total_seconds() // 60)
+    sign = "+" if minutes >= 0 else "-"
+    hours, rest = divmod(abs(minutes), 60)
+    return f"UTC{sign}{hours}" + (f":{rest:02d}" if rest else "")
+
+
+def slot_label(start: datetime, tz: ZoneInfo | None) -> str:
+    """A slot as the prospect reads it: 'Thursday 15 October, 09:00 (your time, UTC-5)'. Daylight
+    saving is applied for that date. With no known time zone it is plainly UTC."""
+    if tz is None:
+        return f"{start.astimezone(ZoneInfo('UTC')):%A %d %B, %H:%M} UTC"
+    local = start.astimezone(tz)
+    return f"{local:%A %d %B, %H:%M} (your time, {_offset(local)})"
 
 
 def _time(snippet: str) -> tuple[int, int | None]:

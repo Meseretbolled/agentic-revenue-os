@@ -343,7 +343,7 @@ def test_meeting_offers_slots_and_writes_a_brief_citing_lessons(conn, ro_conn, p
     slots = tuple(rig.world.calendar.free_slots(datetime(2026, 10, 13, 8, tzinfo=UTC),
                                                 datetime(2026, 10, 14, 18, tzinfo=UTC), 30)[:3])
     run = rig.orch.run_agent(rig.deal_id, "meeting", "meeting.1", slots=slots)
-    assert run.status == "completed"
+    assert run.status == "completed", run.human_reason
     types = [p["action_type"] for p in run.proposals]
     assert types == ["follow_up", "crm_note"]
     assert f"L{lesson}" in run.proposals[1]["payload"]["text"]

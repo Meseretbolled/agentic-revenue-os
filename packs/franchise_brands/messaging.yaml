@@ -23,6 +23,13 @@ pillars:
       Media Activation and Measurement and Attribution sit in the same platform, so results and
       attribution are in one place.
 
+snippets:
+  # Wording for the email that follows a reply. {{ first_name }} is filled in by the code.
+  reply_ack_interested: "Glad this is relevant, and happy to find a time to talk."
+  reply_ack_default: "I appreciate you taking the time to reply."
+  slots_intro_local: "Here are a few times that work on our side, shown in your time zone:"
+  slots_intro_utc: "Here are a few times that work on our side. I do not have your time zone yet, so these are in UTC:"
+
 templates:
   first_touch:
     subject: "Scaling local campaigns at {{ company }}"
@@ -72,9 +79,9 @@ templates:
     body: |
       Hi {{ first_name }},
 
-      {{ personalised_line }}
+      Thanks for getting back to me, {{ first_name }}. {{ reply_ack }}
 
-      Times that work on our side:
+      {{ slots_intro }}
       {{ slots_text }}
 
       {{ sender_name }}

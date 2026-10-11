@@ -303,6 +303,18 @@ class Messaging(Strict):
     tone: list[str] = Field(min_length=1)
     pillars: list[Pillar] = Field(min_length=1)
     templates: dict[str, EmailTemplate]
+    # Short pieces of wording the code fills in (a reply acknowledgement, how the slot list is
+    # introduced). They are approved text for the claim checker, like the templates.
+    snippets: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("snippets")
+    @classmethod
+    def _required_snippets(cls, value: dict[str, str]) -> dict[str, str]:
+        missing = sorted({"reply_ack_interested", "reply_ack_default", "slots_intro_local",
+                          "slots_intro_utc"} - set(value))
+        if missing:
+            raise ValueError("missing snippet(s): " + ", ".join(missing))
+        return value
 
     @field_validator("templates")
     @classmethod

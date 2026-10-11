@@ -97,7 +97,7 @@ def test_an_accept_slot_reply_books_the_meeting_once_and_sends_an_invite(conn, r
 
 
 def slot_label(dt: datetime) -> str:
-    return f"{dt:%A %d %B %H:%M} UTC"
+    return f"{dt:%A %d %B, %H:%M} (your time, UTC+0)"
 
 
 def test_the_invite_and_confirmation_go_only_to_the_contact_row_address(conn, ro_conn, pack, clock):

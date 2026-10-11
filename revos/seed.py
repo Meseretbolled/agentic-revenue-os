@@ -31,6 +31,11 @@ def load_profiles(segment_id: str, path: Path = PROFILES_FILE) -> dict[str, dict
         missing = {"company", "domain", "contact", "fields"} - set(profile)
         if missing:
             raise ValueError(f"seed profile {name!r} lacks {', '.join(sorted(missing))}")
+        for note in profile.get("research_notes", []):
+            if not str(note.get("text", "")).strip() or not str(note.get("source", "")).lower().startswith(
+                    "fictional demo profile"):
+                raise ValueError(f"seed profile {name!r}: every research note needs text and a source "
+                                 "starting 'fictional demo profile'")
     return profiles
 
 
@@ -46,7 +51,8 @@ def demo_address(tag: str, env: Mapping[str, str] | None = None) -> str:
 
 
 def seed_lead(conn: psycopg.Connection, clock: Clock, *, segment_id: str, pack_version: str, company: str,
-              domain: str, contact_name: str, email: str, fields: dict | None = None) -> tuple[UUID, bool]:
+              domain: str, contact_name: str, email: str, fields: dict | None = None,
+              timezone: str | None = None) -> tuple[UUID, bool]:
     """Create the company, contact and deal and queue lead.created. Safe to repeat: the same email
     returns the same deal and queues nothing new. Returns (deal id, created)."""
     email = email.strip().lower()
@@ -62,8 +68,8 @@ def seed_lead(conn: psycopg.Connection, clock: Clock, *, segment_id: str, pack_v
             "INSERT INTO companies (segment_id, name, domain) VALUES (%s, %s, %s) RETURNING id",
             (segment_id, company, domain)).fetchone()[0]
         contact_id = conn.execute(
-            "INSERT INTO contacts (company_id, email, full_name, timezone) VALUES (%s, %s, %s, 'UTC') "
-            "RETURNING id", (company_id, email, contact_name)).fetchone()[0]
+            "INSERT INTO contacts (company_id, email, full_name, timezone) VALUES (%s, %s, %s, %s) "
+            "RETURNING id", (company_id, email, contact_name, timezone)).fetchone()[0]
         deal_id = conn.execute(
             "INSERT INTO deals (segment_id, company_id, contact_id, fields) VALUES (%s, %s, %s, %s) "
             "RETURNING id", (segment_id, company_id, contact_id, Jsonb(fields or {}))).fetchone()[0]

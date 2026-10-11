@@ -12,7 +12,7 @@ from revos.agents.common import (
 )
 from revos.agents.types import AgentEnv, AgentOutput
 from revos.domain.drafting import Evidence
-from revos.ports.llm import DraftRequest
+from revos.ports.llm import DraftProposal, DraftRequest
 from revos.segments.schema import CaseStudy
 from revos.skills.angle import choose_pillar
 from revos.skills.drafting import DraftOutcome, draft_with_checks
@@ -29,8 +29,15 @@ class Drafted:
     evidence: Evidence
 
 
+class _NoModel:
+    """For emails whose wording is entirely the pack's: nothing for a model to write."""
+
+    def draft_email(self, request: DraftRequest) -> DraftProposal:
+        return DraftProposal("", ())
+
+
 def draft_and_check(env: AgentEnv, template_name: str, *, use_case_study: bool = True,
-                    extra_context=None, extra_approved=()) -> Drafted:
+                    use_model: bool = True, extra_context=None, extra_approved=()) -> Drafted:
     """Gather context through scoped tools, let the lessons choose the angle, draft with the model,
     check with code. Shared with the meeting agent, which writes a different email the same way."""
     tools = env.tools
@@ -58,7 +65,8 @@ def draft_and_check(env: AgentEnv, template_name: str, *, use_case_study: bool =
     approved, names = check_inputs(env.pack, template, env.identity, company["name"],
                                    contact.get("full_name"), study, extra_approved)
     request = DraftRequest(template.subject, template.body, context, evidence)
-    outcome = draft_with_checks(env.judge, request, approved, names, env.verifier)
+    outcome = draft_with_checks(env.judge if use_model else _NoModel(), request, approved, names,
+                                env.verifier)
     return Drafted(outcome, study, lessons, shaping, pillar.id, deal, evidence)
 
 

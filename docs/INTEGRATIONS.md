@@ -203,6 +203,22 @@ switch and hard blocks are untouched (there is a test for each).
 (fictional, synthetic CRM signals; no reply or meeting is faked). With the sample pack they score
 A (83/100), B (51/100) and C (23/100) from the pack's own weights, each with a per-rule written reason.
 
+Each profile also has the contact's IANA `timezone` and two `research_notes`: invented facts about
+the fictional company, each with a `source` that must start `fictional demo profile`. Enrichment stores
+them as sourced facts (`fact:DEMO1`, `fact_source:DEMO1`) after any real research (which comes first
+and takes priority), the first email cites one through the claim checker and prints its source label,
+and the trace says they are fictional demo data. They are never presented as real research.
+
+### How the emails read
+
+* The meeting email acknowledges the reply ("Thanks for getting back to me, Maya." plus a sentence for
+  the reply's class, from the pack's `messaging.yaml` `snippets`) and then gives the times; no model writes it.
+* Slots are chosen inside the prospect's working hours (the pack's send-window hours) in their time
+  zone, on the weekday they named if one is free, and shown as `Thursday 15 October, 09:00 (your time, UTC-5)`
+  with the offset for that date (daylight saving applies). The data (actions, `offered_slots`, the invite,
+  the `slots.offered` audit row) stays in UTC. With no valid time zone the email says so and shows UTC, and
+  a `slots.timezone_unknown` audit row is written. A reply naming a local time is matched in that zone.
+
 ## Other services
 
 `revos doctor` checks each with one harmless read and prints one line: `REAL OK`, `REAL FAILED`

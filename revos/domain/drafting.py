@@ -8,6 +8,7 @@ class EvidenceItem:
     text: str                    # the quote or approved fact itself
     source_url: str | None = None
     stale: bool = False          # too old to be called recent
+    demo: bool = False           # a fictional demo-profile fact: never presented as real research
 
 
 @dataclass(frozen=True)

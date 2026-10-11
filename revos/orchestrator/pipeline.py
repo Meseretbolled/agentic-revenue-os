@@ -66,7 +66,7 @@ from revos.skills.crm_fields import call_summary, outreach_status, sequence_day
 from revos.skills.handoff import build_handoff
 from revos.skills.io import manager_ceiling, validate_io
 from revos.skills.scoring import score_lead
-from revos.skills.slots import slot_text
+from revos.skills.slots import resolve_tz, slot_text
 
 # A run that ends one of these ways goes to a person, with an audit entry. Order matters.
 HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
@@ -143,20 +143,44 @@ class Orchestrator:
         self.inbox, self.crm_sync, self.daily_cap = inbox, crm_sync, daily_cap
         self.store = RunStore(conn)
 
-    def _slots(self, reply_text: str = "") -> tuple[Slot, ...]:
-        """Three free slots. If the reply names a weekday ("can we talk Thursday?"), offer slots on
-        that day when any are free; otherwise fall back to the next free ones and say so in the audit."""
+    def _audit_slots(self, deal_id: UUID, payload: Mapping[str, Any]) -> None:
+        """Keep the UTC value of every offered slot on record, with how it was shown to the prospect."""
+        write_audit(self.conn, "orchestrator", "slots.offered", deal_id, {
+            "slots_utc": list(payload["slots"]), "timezone": payload.get("timezone") or "UTC",
+            "shown_as": list(payload.get("slots_shown", []))})
+        if not payload.get("timezone"):
+            write_audit(self.conn, "orchestrator", "slots.timezone_unknown", deal_id, {
+                "reason": "the contact has no (valid) time zone: slots were shown in UTC and said so"})
+
+    def _slots(self, deal_id: UUID, reply_text: str = "") -> tuple[Slot, ...]:
+        """Three free slots, judged in the prospect's own time zone: inside their working hours (the
+        pack's send window hours) and, if the reply names a weekday ("can we talk Thursday?"), on that
+        day. When nothing fits, fall back to the next free slots and say so in the audit."""
         if self.calendar is None:
             return ()
+        deal = self._deal(deal_id)
+        tz = resolve_tz(self.conn.execute("SELECT timezone FROM contacts WHERE id = %s",
+                                          (deal["contact_id"],)).fetchone()[0])
+        window = self.policy_config(self._pack(deal)).send_window
         now = self.clock.now()
         free = self.calendar.free_slots(now + timedelta(days=1), now + timedelta(days=8), 30)
+
+        def local(slot: Slot) -> datetime:
+            return slot.start.astimezone(tz) if tz else slot.start
+
+        working = [s for s in free if tz is None
+                   or window.start_hour <= local(s).hour and local(s).hour + local(s).minute / 60 + 0.5
+                   <= window.end_hour]
         wanted = {i for i, name in enumerate(WEEKDAY_NAMES) if re.search(rf"\b{name}s?\b",
                                                                         new_text(reply_text), re.I)}
-        preferred = [s for s in free if s.start.weekday() in wanted]
+        preferred = [s for s in working if local(s).weekday() in wanted]
         if wanted and not preferred:
-            write_audit(self.conn, "orchestrator", "slots.preference_unmet", None,
+            write_audit(self.conn, "orchestrator", "slots.preference_unmet", deal_id,
                         {"reason": "no free slot on the weekday the reply asked for"})
-        return tuple((preferred or free)[:3])
+        if not (preferred or working):
+            write_audit(self.conn, "orchestrator", "slots.preference_unmet", deal_id,
+                        {"reason": "no free slot inside the contact's working hours"})
+        return tuple((preferred or working or free)[:3])
 
     def _last_outbound_subject(self, deal_id: UUID) -> str | None:
         row = self.conn.execute("SELECT subject FROM messages WHERE deal_id = %s AND direction = "
@@ -290,6 +314,7 @@ class Orchestrator:
             approved = action["status"] == "approved"
             if payload.get("template") == "meeting_offer" and payload.get("slots"):
                 self._merge_fields(deal_id, {"offered_slots": payload["slots"]})
+                self._audit_slots(deal_id, payload)
             if atype == "send_io" and approved:
                 self._merge_fields(deal_id, {"io_approved": True})
             if atype in INTERNAL and approved:
@@ -852,8 +877,9 @@ class Orchestrator:
                 self.advance(deal_id, DealStage(run.output["stage_suggestion"]), f"reply: {label}")
             already_booked = "meeting_start" in (self._deal(deal_id)["fields"] or {})
             if label == "interested" and not already_booked:   # route: offer meeting times
-                meeting = self.run_agent(deal_id, "meeting", f"meeting:{email.message_id}",
-                                         slots=self._slots(email.body))
+                meeting = self.run_agent(
+                    deal_id, "meeting", f"meeting:{email.message_id}",
+                    slots=self._slots(deal_id, email.body), input_={"reply_label": label})
                 runs.append(("meeting", meeting.status))
                 if meeting.status != "completed":
                     return done("needs_human", meeting.human_reason, label)

@@ -6,6 +6,10 @@
 # real event (a reply, a booked meeting) are deliberately NOT faked: the only engagement signal a
 # lead can honestly carry before any outreach is a case-study click.
 #
+# `timezone` is the contact's IANA time zone (slots are shown in it). `research_notes` are invented
+# facts about the fictional company; each `source` must say it is a fictional demo profile, and the
+# emails label them so. They are never real research, and real research found later takes priority.
+#
 # Expected tiers come from the pack's own weights (fit 0.5, intent 0.3, engagement 0.2; A >= 65,
 # B >= 40, C >= 20); tests/unit/test_seed_profiles.py enforces them.
 franchise_brands:
@@ -14,6 +18,12 @@ franchise_brands:
     domain: harborview-optical.example
     contact: Maya Ortiz
     expect_tier: A
+    timezone: America/Chicago
+    research_notes:
+      - text: "Harborview Optical Collective runs 85 locations across Texas and Oklahoma."
+        source: "fictional demo profile (invented for this demo, not real research)"
+      - text: "Harborview Optical Collective is hiring a Regional Marketing Manager."
+        source: "fictional demo profile (invented for this demo, not real research)"
     fields:
       location_count: 85
       is_franchise: true
@@ -32,6 +42,12 @@ franchise_brands:
     domain: millbrook-inns.example
     contact: Lee Chen
     expect_tier: B
+    timezone: America/Toronto
+    research_notes:
+      - text: "Millbrook Inns runs 22 inns across Ontario and Quebec."
+        source: "fictional demo profile (invented for this demo, not real research)"
+      - text: "Millbrook Inns is planning a regional campaign for the spring season."
+        source: "fictional demo profile (invented for this demo, not real research)"
     fields:
       location_count: 22
       is_franchise: true
@@ -46,6 +62,12 @@ franchise_brands:
     domain: ridgeline-parts.example
     contact: Pat Kim
     expect_tier: C
+    timezone: America/Mexico_City
+    research_notes:
+      - text: "Ridgeline Auto Parts runs 12 stores across Mexico."
+        source: "fictional demo profile (invented for this demo, not real research)"
+      - text: "Ridgeline Auto Parts sells replacement parts to independent garages."
+        source: "fictional demo profile (invented for this demo, not real research)"
     fields:
       location_count: 12
       is_franchise: false

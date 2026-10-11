@@ -75,7 +75,8 @@ def test_an_interested_reply_gets_meeting_times_from_the_calendar(conn, ro_conn,
     rig = started(conn, ro_conn, pack, clock)
     rig.orch.handle_reply(rig.deal_id, mail("Sounds good, let's talk next week", "i1"))
     follow_up = conn.execute("SELECT id, payload FROM actions WHERE type = 'follow_up'").fetchone()
-    assert "UTC" in follow_up[1]["body"] and "Times that work on our side" in follow_up[1]["body"]
+    assert "UTC+0" in follow_up[1]["body"] and "Thanks for getting back to me, Sam." in follow_up[1]["body"]
+    assert "I wanted to reach out" not in follow_up[1]["body"]
     assert rig.orch.send_action(follow_up[0]).status == "sent"
     assert len(rig.world.mailer.sent) == 2
     note = conn.execute("SELECT id FROM actions WHERE type = 'crm_note'").fetchone()[0]

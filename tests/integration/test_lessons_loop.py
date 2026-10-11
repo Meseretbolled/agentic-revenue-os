@@ -203,7 +203,7 @@ def test_the_citation_is_available_as_slack_message_data(conn, ro_conn, pack, cl
 def test_the_call_brief_summarises_lists_objections_and_cites_the_lessons(conn, ro_conn, pack, clock):
     rig = after_call(conn, ro_conn, pack, clock)
     lesson_id = next(r[0] for r in lesson_row(conn) if "brand compliance" in r[2])
-    slots = rig.orch._slots()
+    slots = rig.orch._slots(rig.deal_id)
     run = rig.orch.run_agent(rig.deal_id, "meeting", "meeting.next", slots=slots)
     brief = next(p for p in run.proposals if p["action_type"] == "crm_note")["payload"]
     text = brief["text"]
