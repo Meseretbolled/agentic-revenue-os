@@ -67,6 +67,7 @@ from revos.skills.handoff import build_handoff
 from revos.skills.io import manager_ceiling, validate_io
 from revos.skills.scoring import score_lead
 from revos.skills.slots import resolve_tz, slot_text
+from revos.slack.notifier import POSTED_TYPES
 
 # A run that ends one of these ways goes to a person, with an audit entry. Order matters.
 HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
@@ -131,10 +132,12 @@ class Orchestrator:
                  customer_success_owner: str = "customer-success", inbox: Inbox | None = None,
                  crm_sync: bool = False, daily_cap: int | None = None,
                  plus_bases: frozenset[str] = frozenset(),
-                 send_window_bypass: bool = False, domain_cap_bypass: bool = False) -> None:
+                 send_window_bypass: bool = False, domain_cap_bypass: bool = False,
+                 notifier: Any = None) -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.plus_bases, self.send_window_bypass = plus_bases, send_window_bypass
         self.domain_cap_bypass = domain_cap_bypass
+        self.notifier = notifier                        # SlackNotifier, or None when Slack is not wired
         self.runner, self.research, self.provider = runner, research, provider
         self.identity = identity or Identity()
         self.demo_mode, self.allowed_recipients, self.calendar = demo_mode, allowed_recipients, calendar
@@ -334,6 +337,8 @@ class Orchestrator:
                     "action_id": str(action["id"]), "action_type": atype,
                     "lesson_ids": payload["lesson_ids"], "angle": payload.get("angle"),
                     "run": run.step})
+            if proposal.created:
+                self._notify(action["id"])
             outcome = (proposal.decision.outcome.value if proposal.decision
                        else f"existing:{action['status']}")
             rejected = action["status"] == "cancelled"
@@ -418,6 +423,18 @@ class Orchestrator:
             Claim(c["text"], tuple(c["evidence"])) for c in payload.get("claims", [])))
         issues = deterministic_check(draft, evidence_from_fields(deal["fields"] or {}), approved, names)
         return not issues
+
+    def _notify(self, action_id: UUID) -> None:
+        """Ask for the action's Slack message to be posted or brought up to date (a job, so a Slack
+        outage never touches the action itself). One event per (action, state), so repeats do nothing."""
+        if self.notifier is None:
+            return
+        row = self.conn.execute("SELECT status, decision, sent_at IS NOT NULL, type FROM actions "
+                                "WHERE id = %s", (action_id,)).fetchone()
+        if row[3] not in POSTED_TYPES:
+            return
+        record_event(self.conn, f"slack:{action_id}:{row[0]}:{row[1]}:{row[2]}", "slack.sync",
+                     {"action_id": str(action_id)}, self.clock)
 
     def _queue_send(self, action: Mapping[str, Any], key: str) -> None:
         if action["status"] == "approved":
@@ -1069,6 +1086,7 @@ class Orchestrator:
         elif result.status == "deferred" and result.run_at:
             record_event(self.conn, f"send:{action_id}:{result.run_at.isoformat()}", "action.send",
                          {"action_id": str(action_id)}, self.clock, run_at=result.run_at)
+        self._notify(action_id)
         return result
 
     def _superseded_crm_write(self, action_id: UUID) -> bool:
@@ -1178,6 +1196,7 @@ class Orchestrator:
 
         def veto_expired(_conn: psycopg.Connection, job: Any) -> None:
             for action_id in release_veto_expired(self.conn, self.clock):
+                self._notify(action_id)
                 self.send_action(action_id)
 
         def snooze_ended(_conn: psycopg.Connection, job: Any) -> None:
@@ -1195,13 +1214,18 @@ class Orchestrator:
         def signature_event(_conn: psycopg.Connection, job: Any) -> None:
             self.complete_signature(job.payload["envelope_id"])
 
+        def slack_sync(_conn: psycopg.Connection, job: Any) -> None:
+            if self.notifier is not None:
+                self.notifier.sync(UUID(job.payload["action_id"]))
+
         def stall_scan(_conn: psycopg.Connection, job: Any) -> None:
             sweeps.stall_scan(self.conn, self.clock)
 
         def digest(_conn: psycopg.Connection, job: Any) -> None:
-            sweeps.digest(self.conn, self.clock)
+            sweeps.digest(self.conn, self.clock, self.notifier)
 
-        return {"tracking.stall_scan": stall_scan, "tracking.digest": digest, "email.poll": poll,
+        return {"slack.sync": slack_sync, "tracking.stall_scan": stall_scan, "tracking.digest": digest,
+                "email.poll": poll,
                 "signature.event": signature_event, "lead.created": lead_created,
                 "action.send": send, "lessons.sweep": lessons_sweep,
                 "action.veto_expired": veto_expired, "lead.snooze_ended": snooze_ended,

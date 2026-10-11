@@ -29,3 +29,7 @@ startup banner of `revos run` lists REAL or MOCK for every integration, and the 
 start if a service that will run as REAL fails its check (it never swaps in a mock quietly).
 Slack, Fireflies, Dropbox Sign and Tavily have no adapter yet, so they run as MOCK even with a key.
 See `docs/INTEGRATIONS.md` for what has and has not been run against the real services.
+
+Slack: set `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `SLACK_CHANNEL` (and `PUBLIC_BASE_URL` from a tunnel) and
+auto-with-veto emails appear in the channel with a Cancel button. `revos slack-test` posts a test message. See
+`docs/INTEGRATIONS.md` for the Slack app settings and the tunnel.

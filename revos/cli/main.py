@@ -222,6 +222,41 @@ def logs(deal: str = typer.Option(None, "--deal", help="only this deal id"),
         typer.echo(json.dumps(row, ensure_ascii=False))
 
 
+@app.command("slack-test")
+def slack_test() -> None:
+    """Post ONE test message (with a harmless button) to SLACK_CHANNEL, then update it in place."""
+    import os
+
+    from revos.composition import build_slack
+    from revos.domain.errors import RevosError
+    from revos.env import load_env_file
+    from revos.modes import slack_configured
+    load_env_file()
+    if not slack_configured():
+        typer.echo("SLACK_BOT_TOKEN is not set: Slack runs as MOCK. Nothing was posted.", err=True)
+        raise typer.Exit(2)
+    slack, channel = build_slack()
+
+    def note(text: str) -> dict:
+        return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
+
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text":
+               ":white_check_mark: *Revos is connected.* This is a test message; nothing is queued."}},
+              note("Posted by `revos slack-test`.")]
+    try:
+        posted = slack.post(channel, "Revos is connected", blocks)
+        slack.update(posted.channel, posted.ts, "Revos is connected (updated in place)",
+                     [*blocks, note("Updated in place with chat.update.")])
+    except RevosError as exc:
+        typer.echo(f"{exc}", err=True)
+        raise typer.Exit(1) from exc
+    has_secret = bool(os.environ.get("SLACK_SIGNING_SECRET", "").strip())
+    has_url = bool(os.environ.get("PUBLIC_BASE_URL", "").strip())
+    typer.echo(f"posted to {channel} (channel id {posted.channel}) and updated it in place")
+    typer.echo("SLACK_SIGNING_SECRET: " + ("set" if has_secret else "NOT set (buttons will be refused)"))
+    typer.echo("PUBLIC_BASE_URL: " + ("set" if has_url else "NOT set (buttons will not work)"))
+
+
 @app.command("run")
 def run(
     port: int = typer.Option(8100, help="API port"),

@@ -38,7 +38,7 @@ def make_lead(conn, *, domain="brightside-optical.example", company="Brightside 
 
 def make_rig(conn, ro_conn, pack, clock, *, llm=None, world=None, runner=None, mailer=None, inbox=None,
              crm=None, crm_sync=False, daily_cap=None, allowed=(), plus_bases=frozenset(),
-             send_window_bypass=False, domain_cap_bypass=False,             **lead) -> Rig:
+             send_window_bypass=False, domain_cap_bypass=False, notifier=None,             **lead) -> Rig:
     """`mailer`, `inbox` and `crm` replace the mocks (a fake Gmail, a fake HubSpot, ...)."""
     from revos.adapters.router import ActionRouter
     world = world or build_mock_world()
@@ -55,7 +55,7 @@ def make_rig(conn, ro_conn, pack, clock, *, llm=None, world=None, runner=None, m
         calendar=world.calendar, transcripts=world.transcripts, esign=world.esign, inbox=inbox,
         crm_sync=crm_sync, daily_cap=daily_cap, plus_bases=plus_bases,
         send_window_bypass=send_window_bypass,
-        domain_cap_bypass=domain_cap_bypass)
+        domain_cap_bypass=domain_cap_bypass, notifier=notifier)
     return Rig(orch, world, llm, deal_id, contact_id)
 
 

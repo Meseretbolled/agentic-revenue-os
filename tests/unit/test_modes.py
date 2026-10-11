@@ -38,7 +38,7 @@ def test_each_key_switches_its_own_service_to_real() -> None:
 
 
 def test_a_key_for_a_service_without_an_adapter_yet_is_honestly_a_mock() -> None:
-    (slack,) = [m for m in integration_modes({"SLACK_BOT_TOKEN": "x"}) if m.service == "Slack"]
+    (slack,) = [m for m in integration_modes({"FIREFLIES_API_KEY": "x"}) if m.service == "Fireflies"]
     assert slack.mode == MOCK and "key found" in slack.why and "adapter not built yet" in slack.why and not slack.built
 
 
@@ -127,10 +127,10 @@ def test_a_failing_check_for_a_service_that_runs_as_a_mock_does_not_block_start_
 
 
 def test_a_working_key_for_a_service_without_an_adapter_says_so_plainly(monkeypatch) -> None:
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "x")
-    monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Slack", OK), Check("Tavily", FAILED, "key rejected")])
+    monkeypatch.setenv("FIREFLIES_API_KEY", "x")
+    monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Fireflies", OK), Check("Tavily", FAILED, "key rejected")])
     out = CliRunner().invoke(app, ["doctor"]).output
-    assert "Slack         key OK, adapter not built yet: runs as MOCK" in out
+    assert "Fireflies     key OK, adapter not built yet: runs as MOCK" in out
     assert "REAL OK" not in out and "will run as: MOCK" not in out
     monkeypatch.setenv("TAVILY_API_KEY", "t")
     out = CliRunner().invoke(app, ["doctor"]).output
@@ -139,9 +139,9 @@ def test_a_working_key_for_a_service_without_an_adapter_says_so_plainly(monkeypa
 
 def test_the_banner_uses_the_same_wording(monkeypatch, tmp_path, test_db_url) -> None:
     monkeypatch.setenv("DATABASE_URL", test_db_url)
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "x")
+    monkeypatch.setenv("FIREFLIES_API_KEY", "x")
     monkeypatch.setenv("REVOS_LOG_FILE", str(tmp_path / "l.jsonl"))
-    monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Slack", OK)])
+    monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Fireflies", OK)])
 
     class Stub:
         def __init__(self, **kw):
@@ -158,4 +158,4 @@ def test_the_banner_uses_the_same_wording(monkeypatch, tmp_path, test_db_url) ->
     import revos.runtime.supervisor as sup
     monkeypatch.setattr(sup, "Supervisor", Stub)
     out = CliRunner().invoke(app, ["run", "--no-api"]).output
-    assert "Slack         key OK, adapter not built yet: runs as MOCK" in out
+    assert "Fireflies     key OK, adapter not built yet: runs as MOCK" in out

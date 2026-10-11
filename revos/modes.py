@@ -47,6 +47,10 @@ def gmail_keys(env: Mapping[str, str] | None = None) -> bool:
     return _has(os.environ if env is None else env, "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD")
 
 
+def slack_configured(env: Mapping[str, str] | None = None) -> bool:
+    return _has(os.environ if env is None else env, "SLACK_BOT_TOKEN")
+
+
 def llm_live(env: Mapping[str, str] | None = None) -> bool:
     env = os.environ if env is None else env
     return env.get("LLM_MODE", "fake") == "live" and _has(env, "ANTHROPIC_API_KEY")
@@ -66,12 +70,13 @@ def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
         Mode("LLM budget", REAL if llm_live(env) else MOCK, llm_why),
         Mode("HubSpot", REAL if hubspot_configured(env) else MOCK,
              "" if hubspot_configured(env) else "no key"),
-        not_built("Slack", "SLACK_BOT_TOKEN", "Step 10"),
+        Mode("Slack", REAL if slack_configured(env) else MOCK, "" if slack_configured(env) else "no key"),
         Mode("Gmail", REAL if gmail_keys(env) else MOCK, "" if gmail_keys(env) else "no key"),
         not_built("Fireflies", "FIREFLIES_API_KEY", "Step 11"),
         not_built("Dropbox Sign", "DROPBOX_SIGN_API_KEY", "Step 12"),
         not_built("Tavily", "TAVILY_API_KEY", "a later step"),
-        Mode("Tunnel URL", MOCK, "only needed once Slack and webhooks are live"),
+        Mode("Tunnel URL", MOCK, "" if _has(env, "PUBLIC_BASE_URL")
+             else "PUBLIC_BASE_URL is not set: Slack buttons will not work"),
     ]
 
 

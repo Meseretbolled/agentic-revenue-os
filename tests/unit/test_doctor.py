@@ -205,7 +205,7 @@ def test_tavily_plan_limits_and_the_tunnel() -> None:
                                ) == Check("Tavily", FAILED, "plan_limit")
     assert doctor.check_tunnel({"PUBLIC_BASE_URL": "https://t.example.test"},
                                http_with(lambda r: httpx.Response(530, json={}))).status == FAILED
-    assert doctor.check_tunnel({}, http_with(ok_everywhere)) == Check("Tunnel URL", MOCK, "no public URL set")
+    assert doctor.check_tunnel({}, http_with(ok_everywhere)) == Check("Tunnel URL", MOCK, "PUBLIC_BASE_URL is not set: Slack buttons will not work")
 
 
 def test_tavily_says_key_rejected_for_401_and_403_and_sends_a_bearer_post_without_leaking() -> None:
@@ -241,7 +241,7 @@ def test_the_command_prints_one_line_per_service_and_exits_1_on_a_failure(monkey
     assert result.exit_code == 1
     first, second, third, fourth = result.output.splitlines()
     assert first.startswith("HubSpot       REAL FAILED  (auth, status 401)") and "will run as: " in first
-    assert second == "Slack         MOCK  (no key)" and third.startswith("Send window") and fourth.startswith("Domain cap")
+    assert second.startswith("Slack         MOCK  (key missing)") and third.startswith("Send window") and fourth.startswith("Domain cap")
     monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Slack", OK)])
     assert CliRunner().invoke(app, ["doctor"]).exit_code == 0
 

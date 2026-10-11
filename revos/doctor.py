@@ -101,7 +101,9 @@ def check_slack(env: Mapping[str, str], http: httpx.Client) -> Check:
         return Check("Slack", FAILED, _http_failure(exc))
     body = got.json() if got.status_code == 200 else {}
     if body.get("ok"):
-        return Check("Slack", OK)
+        missing = [n for n in ("SLACK_SIGNING_SECRET", "SLACK_CHANNEL") if not env.get(n, "").strip()]
+        return Check("Slack", OK, "".join(f"{n} not set; " for n in missing).rstrip("; ")
+                     + (" (buttons will be refused)" if "SLACK_SIGNING_SECRET" in missing else ""))
     error = str(body.get("error", ""))
     auth = got.status_code in (401, 403) or error in {"invalid_auth", "token_revoked", "account_inactive",
                                                        "not_authed", "token_expired"}
@@ -183,9 +185,9 @@ def check_tavily(env: Mapping[str, str], http: httpx.Client) -> Check:
 
 def check_tunnel(env: Mapping[str, str], http: httpx.Client) -> Check:
     if not _present(env, "PUBLIC_BASE_URL"):
-        return Check("Tunnel URL", MOCK, "no public URL set")
+        return Check("Tunnel URL", MOCK, "PUBLIC_BASE_URL is not set: Slack buttons will not work")
     try:
-        got = http.get(env["PUBLIC_BASE_URL"].rstrip("/") + "/health", timeout=TIMEOUT)
+        got = http.get(env["PUBLIC_BASE_URL"].rstrip("/") + "/healthz", timeout=TIMEOUT)
     except httpx.HTTPError as exc:
         return Check("Tunnel URL", FAILED, _http_failure(exc))
     return Check("Tunnel URL", OK) if got.status_code == 200 else Check(

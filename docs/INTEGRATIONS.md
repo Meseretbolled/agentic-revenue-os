@@ -141,6 +141,49 @@ get its contact write refused (a permanent error, in the dead-letter list) while
 deal writes still go through; for a real HubSpot run, give demo contacts a valid-looking address
 such as the prospect test inbox.
 
+## Slack (the veto window, approvals, the digest)
+
+**Status: the real adapter has posted one message and updated it in place (`revos slack-test`). The signed
+interactions endpoint, the buttons and the digest are tested offline against a mock Slack; the live click
+test needs the tunnel (below).**
+
+What it does:
+
+* Every outbound action decided `auto_with_veto` is posted to `SLACK_CHANNEL` as a Block Kit message: what will
+  be sent and to whom (the lead's name and company, never the address), the score and tier with the written
+  reason, the case study, the lesson ids, the claim-check result, and "Sends in 60 seconds" with a **Cancel**
+  button. When the window ends the same message is updated (`chat.update`) to "Sent <time>" or "Cancelled by
+  <user>".
+* Actions that need approval (approval mode, or a `needs_approval` level) show **Approve** and **Reject**.
+  Hard-blocked actions are posted as "Blocked: <reason>" with no button, and a forged approve for one is
+  refused and audited.
+* `POST /slack/interactions` verifies Slack's v0 signature over the raw body (HMAC-SHA256, constant-time, five
+  minutes of clock tolerance), answers 401 (and logs without the body) otherwise. A button carries only the
+  action id: the action's state and whether the press is allowed are re-read from Postgres. A cancel is a
+  compare-and-set under the action's row lock, so it and the send at the end of the window cannot both win.
+  The same press delivered twice (same trigger id) does nothing the second time and still answers 200.
+  `SLACK_ALLOWED_USERS` limits who may press buttons; others get an ephemeral refusal and an audit row.
+* `tracking.digest` also posts a daily summary (leads by stage, emails sent, replies, vetoes, held and deferred
+  sends, waiting for approval, dead letters, held replies, new lessons, deals stalled), once per day.
+
+Slack app settings (api.slack.com/apps):
+
+1. **OAuth & Permissions, Bot Token Scopes**: `chat:write` (post and update). `chat.postEphemeral` needs no
+   extra scope. Add `channels:read` only if you later want the app to look channels up by name; it does not now.
+   Install the app to the workspace and copy the **Bot User OAuth Token** (`xoxb-...`) into `SLACK_BOT_TOKEN`.
+2. **Invite the bot to the channel** (`/invite @YourApp` in `SLACK_CHANNEL`); without it Slack answers
+   `not_in_channel`.
+3. **Basic Information, Signing Secret** into `SLACK_SIGNING_SECRET`.
+4. **Interactivity & Shortcuts**: turn on Interactivity and set the **Request URL** to
+   `PUBLIC_BASE_URL/slack/interactions`.
+5. `PUBLIC_BASE_URL` is the https URL of a tunnel to port 8100, for example
+   `cloudflared tunnel --url http://localhost:8100` (it prints a `https://....trycloudflare.com` URL; a quick
+   tunnel's URL changes each time, so update `PUBLIC_BASE_URL` and the Request URL when it does).
+   `revos doctor` calls `GET PUBLIC_BASE_URL/healthz` through the tunnel, and says plainly when it is unset:
+   "Slack buttons will not work".
+
+Commands: `revos slack-test` posts one test message and updates it in place.
+
 ## Running the system by itself (`revos run`)
 
 `revos run` starts the API (port 8100), the worker and the scheduler in one process and prints a
@@ -154,7 +197,7 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
 * **Real by default**: keys in `.env` select the real adapter, missing keys select the mock. With a
   key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
   fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
-* **Not built yet, so MOCK even with a key**: Slack (Step 10), Fireflies (Step 11), Dropbox Sign
+* **Not built yet, so MOCK even with a key**: Fireflies (Step 11), Dropbox Sign
   (Step 12), Tavily. For these, `revos doctor` and the banner say `key OK, adapter not built yet:
   runs as MOCK` (or `key NOT working (...)`) instead of `REAL OK`.
 * **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
@@ -265,12 +308,12 @@ value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dr
 |---|---|---|
 | Postgres | `SELECT 1` | seen working locally |
 | LLM budget | reads the spend ledger; never calls the model | not run with a live key |
-| Slack | `auth.test` | REAL OK (owner's run) |
+| Slack | `auth.test`; also notes a missing `SLACK_SIGNING_SECRET` | REAL OK; a real post and in-place update succeeded |
 | Gmail | IMAP login and logout only | REAL OK (owner's run) |
 | Fireflies | GraphQL `{ user { user_id } }` | REAL OK (owner's run) |
 | Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | REAL OK (owner's run) |
 | Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | our call matches Tavily's documented shape; the owner's key was answered 403, which doctor now reports as `key rejected` (check or regenerate the key) |
-| Tunnel URL | `GET <PUBLIC_BASE_URL>/health` | unverified live |
+| Tunnel URL | `GET <PUBLIC_BASE_URL>/healthz` | unverified live |
 
 ## Commands
 
