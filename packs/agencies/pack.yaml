@@ -1,0 +1,8 @@
+id: agencies
+name: Marketing and advertising agencies
+version: "0.1.0"
+demo: false
+description: >
+  Marketing and advertising agencies that run campaigns for several client brands and need one place to
+  create, activate and measure them. Product focus: DCO and Creative Automation, Media Activation,
+  Measurement and Attribution. A second segment, added by configuration only.

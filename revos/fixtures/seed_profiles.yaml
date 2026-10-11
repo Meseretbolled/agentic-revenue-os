@@ -87,3 +87,59 @@ franchise_brands:
       contact_seniority: other
       hiring_marketing_roles: true
       website_visits_30d: 3
+
+# A second segment: two fictional marketing agencies. Every company, person and number is invented; each note's
+# source says so, and the emails label them so.
+agencies:
+  hot:
+    company: Bluepeak Media Group
+    domain: bluepeak-media.example
+    contact: Dana Whitfield
+    expect_tier: A
+    signer_email_tag: signer-bluepeak
+    signer_name: Omar Haddad            # the lead record's signer (fictional)
+    signer_role: Managing Director
+    signer_note: fictional demo signer (invented for this demo)
+    timezone: America/New_York
+    research_notes:
+      - text: "Bluepeak Media Group serves 38 client brands across 6 media channels."
+        source: "fictional demo profile (invented for this demo, not real research)"
+      - text: "Bluepeak Media Group is hiring a Head of Performance Creative."
+        source: "fictional demo profile (invented for this demo, not real research)"
+    fields:
+      is_agency: true
+      client_count: 38
+      channels_managed: 6
+      inhouse_creative_team_size: 5
+      managed_media_spend_usd: 4200000
+      region: US
+      contact_seniority: director
+      requested_demo: true
+      visited_pricing_page: true
+      website_visits_30d: 7
+      hiring_marketing_roles: true
+      reporting_pain_mentioned: true
+      clicked_case_study: true
+  warm:
+    company: Tidewater Creative Co
+    domain: tidewater-creative.example
+    contact: Jonas Meier
+    expect_tier: B
+    signer_email_tag: signer-tidewater
+    signer_note: fictional demo signer (invented for this demo)
+    timezone: Europe/Berlin
+    research_notes:
+      - text: "Tidewater Creative Co serves 14 client brands across 3 media channels."
+        source: "fictional demo profile (invented for this demo, not real research)"
+      - text: "Tidewater Creative Co is a small agency with a creative team of 4."
+        source: "fictional demo profile (invented for this demo, not real research)"
+    fields:
+      is_agency: true
+      client_count: 14
+      channels_managed: 3
+      inhouse_creative_team_size: 4
+      region: DE
+      contact_seniority: head
+      visited_pricing_page: true
+      website_visits_30d: 4
+

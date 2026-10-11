@@ -1,0 +1,11 @@
+# What to read from an agency's own website, and how. Rules, not a model: each value comes with the sentence it
+# was found in. SAMPLE keywords for the demo; tune against real sites.
+pages: ["/", "/about", "/clients"]
+extractors:
+  - {field: is_agency, kind: flag, any: ["agency", "marketing agency", "advertising agency"]}
+  - {field: client_count, kind: number, pattern: '(\d[\d,]*)\s+(?:clients|client brands|brands we work with)'}
+  - {field: channels_managed, kind: number, pattern: '(\d{1,2})\s+(?:channels|media channels)'}
+  - {field: inhouse_creative_team_size, kind: number, pattern: '(\d{1,3})\s+(?:designers|creatives|creative team members)'}
+  - {field: region, kind: keyword, map: {US: ["Texas", "New York", "Chicago", "United States"],
+                                         GB: ["London", "United Kingdom"], FR: ["Paris", "France"],
+                                         DE: ["Berlin", "Germany"], CA: ["Toronto", "Canada"]}}

@@ -1,0 +1,40 @@
+# Only the verified case studies that apply to agencies, copied unchanged (figures, links, labels) from the other
+# segment's library: performance results for a margin or return question, and incrementality for measurement.
+# The other studies are about franchise networks and are not used here. No figure is added or changed.
+case_studies:
+- id: global_beauty_brand
+  customer: Global Beauty Brand
+  summary: Performance results quoted as dollar figures only.
+  tags:
+  - price
+  - cpm
+  - performance
+  metrics:
+  - label: ROAS
+    value: $15.52 vs $3.80
+  - label: CPA
+    value: $19.23 vs $87.64
+  quote_dollar_figures_only: true
+  use_for:
+  - price_objection
+  source_url: https://cool.co/cool-ai/
+  source_verified: true
+  label: vendor-reported
+- id: luxury_retail_brand
+  customer: Luxury Retail Brand
+  summary: Incremental revenue and net-new demand.
+  tags:
+  - trust
+  - incrementality
+  metrics:
+  - label: Daily revenue
+    value: +29%
+  - label: Daily orders
+    value: +24%
+  - label: Conversions from net-new demand
+    value: 39%
+  use_for:
+  - first_touch
+  source_url: https://cool.co/blog/case-study/luxury-retail-brand/
+  source_verified: true
+  label: vendor-reported

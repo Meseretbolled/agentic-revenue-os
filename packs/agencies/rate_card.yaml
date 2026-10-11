@@ -1,0 +1,40 @@
+# SAMPLE rate card for agencies. COOL publishes no rate card; every price here is invented for the demo and must
+# never be presented as COOL's pricing. Different units and packages from the other segment: agencies are priced
+# per client brand workspace.
+label: "SAMPLE rate card: illustrative numbers for the demo, not COOL's pricing"
+currency: USD
+items:
+  - {id: client_brand_seat, name: "Client brand workspace", unit: "per client brand per month", price: 350}
+  - {id: creative_automation, name: "DCO and Creative Automation", unit: "per month", price: 3000}
+  - {id: measurement, name: "Measurement and Attribution", unit: "per month", price: 1200}
+  - {id: campaign_media, name: "Campaign media spend (pass-through)", unit: "per $1 of media per month", price: 1}
+
+# SAMPLE packages. The planner picks the largest package whose minimum monthly budget the stated budget reaches,
+# then fills the rest of that monthly budget with campaign media. Quantities are per month; the number of client
+# brand workspaces follows the lead's client_count up to the package's cap.
+packages:
+  - id: boutique
+    name: "Boutique (SAMPLE)"
+    min_monthly_budget_usd: 8000
+    media_item: campaign_media
+    lines:
+      - {id: creative_automation, quantity: 1}
+      - {id: measurement, quantity: 1}
+      - {id: client_brand_seat, quantity_from: client_count, quantity_max: 10}
+  - id: studio
+    name: "Studio (SAMPLE)"
+    min_monthly_budget_usd: 25000
+    media_item: campaign_media
+    lines:
+      - {id: creative_automation, quantity: 2}
+      - {id: measurement, quantity: 1}
+      - {id: client_brand_seat, quantity_from: client_count, quantity_max: 40}
+  - id: network
+    name: "Network (SAMPLE)"
+    min_monthly_budget_usd: 75000
+    media_item: campaign_media
+    lines:
+      - {id: creative_automation, quantity: 4}
+      - {id: measurement, quantity: 2}
+      - {id: client_brand_seat, quantity_from: client_count, quantity_max: 150}
+volume_discounts: []

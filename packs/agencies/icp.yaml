@@ -1,0 +1,71 @@
+# Scoring configuration for agencies.
+# HONESTY NOTE: every weight, threshold and sample value below is our own starting point for the demo. They are
+# not COOL's numbers and should be tuned against real outcomes.
+
+lead_fields:
+  client_count:               {type: int,  description: "Number of client brands the agency serves"}
+  channels_managed:           {type: int,  description: "Number of media channels the agency manages"}
+  inhouse_creative_team_size: {type: int,  description: "People on the agency's in-house creative team"}
+  managed_media_spend_usd:    {type: int,  description: "Estimated yearly media spend the agency manages, USD"}
+  region:                     {type: str,  description: "Country code of the main market"}
+  contact_seniority:          {type: str,  description: "vp, head, director, c_level, manager, other"}
+  is_agency:                  {type: bool, description: "Is a marketing or advertising agency"}
+  is_competitor:              {type: bool, description: "Competes with COOL"}
+  do_not_contact:             {type: bool, description: "Opted out or flagged do-not-contact"}
+  requested_demo:             {type: bool, description: "Asked for a demo"}
+  visited_pricing_page:       {type: bool, description: "Visited the pricing page"}
+  website_visits_30d:         {type: int,  description: "Website visits in the last 30 days"}
+  hiring_marketing_roles:     {type: bool, description: "Has open creative or performance roles"}
+  reporting_pain_mentioned:   {type: bool, description: "Mentioned client reporting or tool-sprawl pain"}
+  replied:                    {type: bool, description: "Replied to outreach"}
+  reply_sentiment:            {type: str,  description: "positive, neutral or negative"}
+  meeting_booked:             {type: bool, description: "A meeting is booked"}
+  clicked_case_study:         {type: bool, description: "Clicked a case study link"}
+
+weights: {fit: 0.5, intent: 0.3, engagement: 0.2}
+tiers: {A: 65, B: 40, C: 20}      # total >= A is tier A; below C is disqualified
+nudge_limit: 10
+
+fit_rules:
+  - {id: clients_10_to_24, field: client_count, op: between, value: [10, 24], points: 15,
+     reason: "Serves {value} client brands: enough accounts to need one place to run them"}
+  - {id: clients_25_plus, field: client_count, op: gte, value: 25, points: 30,
+     reason: "Serves {value} client brands: strong multi-client scale"}
+  - {id: channels_3_to_4, field: channels_managed, op: between, value: [3, 4], points: 10,
+     reason: "Manages {value} channels: results are spread across tools"}
+  - {id: channels_5_plus, field: channels_managed, op: gte, value: 5, points: 20,
+     reason: "Manages {value} channels: measuring across them is hard without one view"}
+  - {id: small_creative_team, field: inhouse_creative_team_size, op: lt, value: 8, points: 15,
+     reason: "A small in-house creative team ({value}): creative automation adds capacity"}
+  - {id: media_spend_1m, field: managed_media_spend_usd, op: gte, value: 1000000, points: 20,
+     reason: "Manages about ${value} of media a year, which supports a platform"}
+  - {id: target_region, field: region, op: in, value: [US, CA, GB, FR, DE], points: 10,
+     reason: "Main market '{value}' is a target region"}
+  - {id: senior_contact, field: contact_seniority, op: in, value: [vp, head, director, c_level], points: 10,
+     reason: "Contact is senior ({value}), so likely a buyer or strong influencer"}
+
+intent_rules:
+  - {id: requested_demo, field: requested_demo, op: truthy, points: 40, reason: "Asked for a demo"}
+  - {id: visited_pricing, field: visited_pricing_page, op: truthy, points: 20,
+     reason: "Visited the pricing page"}
+  - {id: repeat_visits, field: website_visits_30d, op: gte, value: 3, points: 15,
+     reason: "{value} website visits in 30 days"}
+  - {id: hiring_roles, field: hiring_marketing_roles, op: truthy, points: 10,
+     reason: "Hiring creative or performance roles: capacity is a live problem"}
+  - {id: reporting_pain, field: reporting_pain_mentioned, op: truthy, points: 15,
+     reason: "Mentioned client reporting or tool-sprawl pain"}
+
+engagement_rules:
+  - {id: replied, field: replied, op: truthy, points: 25, reason: "Replied to outreach"}
+  - {id: positive_reply, field: reply_sentiment, op: eq, value: positive, points: 25,
+     reason: "The reply was positive"}
+  - {id: meeting_booked, field: meeting_booked, op: truthy, points: 35, reason: "A meeting is booked"}
+  - {id: clicked_case_study, field: clicked_case_study, op: truthy, points: 15, reason: "Clicked a case study"}
+
+disqualifiers:
+  - {id: competitor, field: is_competitor, op: truthy, reason: "Competes with COOL"}
+  - {id: do_not_contact, field: do_not_contact, op: truthy, reason: "Flagged do-not-contact"}
+  - {id: not_an_agency, field: is_agency, op: eq, value: false,
+     reason: "Is not an agency, which belongs to a different segment"}
+  - {id: very_few_clients, field: client_count, op: lt, value: 3,
+     reason: "Only {value} client(s): below the minimum for this segment"}

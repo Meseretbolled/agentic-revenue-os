@@ -55,9 +55,9 @@ def main() -> int:
     from revos.mcp.registry import ToolContext
     from revos.mcp.scope import fixed_scope
     from revos.ports.llm import DraftRequest
-    from revos.segments import load_pack
+    from revos.segments import load_all
 
-    pack = load_pack(ROOT / "packs" / "franchise_brands")
+    pack = next(p for p in load_all(ROOT / "packs").values() if p.meta.demo)      # the demo segment
     cap = float(os.environ.get("SMOKE_MAX_USD", "0.25"))
     config = ClaudeConfig.from_env()
     print(f"model (drafting): {config.model_drafting}")

@@ -1,0 +1,25 @@
+# Fields a deal must hold before it may ENTER the stage. Column fields: tier, total_score,
+# score_reason, hubspot_deal_id. Anything else is read from the deal's call/qualification fields.
+exit_criteria:
+  enriched: [company_domain, client_count]
+  scored: [tier, total_score, score_reason]
+  qualified: [budget, timeline, decision_maker, needs]
+  io_approval: [io_validated]
+  out_for_signature: [io_approved]
+  closed_won: [signature_complete]
+  handoff: [handoff_owner]
+
+# SAMPLE service levels in hours (our targets for the demo, not COOL's).
+sla_hours:
+  new: 1
+  enriched: 1
+  scored: 2
+  outreach: 72
+  replied: 4
+  meeting: 168
+  qualified: 24
+  proposal: 48
+  io_approval: 24
+  out_for_signature: 120
+
+qualification_fields: [budget, timeline, decision_maker, signer, needs, objections, competitors, next_steps]

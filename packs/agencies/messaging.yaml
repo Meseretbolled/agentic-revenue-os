@@ -1,0 +1,150 @@
+# Wording for agencies. Product names and pains come from PROJECT_BRIEF.md section 7 (cool.co); the customer
+# pains for agencies (margin, white-label, tool fatigue) are the questions agencies ask, not claims about the
+# product. Nothing here states a number, a customer or a result: those come only from case_studies.yaml.
+source_note: >
+  Product names from PROJECT_BRIEF.md section 7 (cool.co, read 2026-10-10). Not verbatim copy; refine with the
+  exact site wording. Objection replies make no promise the product team has not confirmed.
+tone:
+  - Plain and specific; no hype words.
+  - "Short, a few sentences, one clear ask."
+  - Never state a number, customer or result that is not in the case-study library.
+  - Never promise a capability (white-label, an integration, a margin) that is not stated in this pack.
+
+pillars:
+  - id: client_campaigns_one_place
+    headline: "Client campaigns in one place"
+    body: >
+      Cool AI brings Create, Activate and Optimize into one platform, including DCO and Creative Automation,
+      Media Activation and Measurement and Attribution, so an agency can run and measure campaigns for several
+      clients in one place.
+  - id: margin
+    headline: "Margin"
+    body: >
+      On margin, the useful question is how much of the work behind each client campaign is manual. DCO and
+      Creative Automation and Media Activation are in the same platform, so we would look at that work together
+      with your team before promising anything.
+  - id: white_label
+    headline: "White-label"
+    body: >
+      On white-label, I would rather check with our product team than guess. Tell me how you present work to your
+      clients and I will confirm what is possible.
+  - id: tool_fatigue
+    headline: "Tool fatigue"
+    body: >
+      Another tool is a fair worry. Create, Activate and Optimize are in one platform, so the aim is to put
+      several steps in one place rather than add another login.
+
+snippets:
+  reply_ack_interested: "Glad this is relevant, and happy to find a time to talk."
+  reply_ack_default: "I appreciate you taking the time to reply."
+  first_touch_fallback: "I wanted to reach out about running campaigns for several clients."
+  follow_up_fallback: "I wanted to follow up on my earlier note about running client campaigns."
+  slots_intro_local: "Here are a few times that work on our side, shown in your time zone:"
+  slots_intro_utc: "Here are a few times that work on our side. I do not have your time zone yet, so these are in UTC:"
+
+templates:
+  first_touch:
+    subject: "Running client campaigns at {{ company }}"
+    body: |
+      Hi {{ first_name }},
+
+      {{ personalised_line }}
+
+      {{ pillar.body }}
+
+      {% if case_study %}One example: {{ case_study.customer }} ({{ case_study.label }}{% if case_study.metric_text %}, {{ case_study.metric_text }}{% endif %}). Source: {{ case_study.source_url }}
+      {% endif %}
+      Would a short call be useful?
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  follow_up:
+    subject: "Re: Running client campaigns at {{ company }}"
+    body: |
+      Hi {{ first_name }},
+
+      {{ personalised_line }}
+
+      {{ pillar.body }}
+
+      Happy to share more if it is useful.
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  case_study_reply:
+    subject: "Re: {{ original_subject }}"
+    body: |
+      Hi {{ first_name }},
+
+      Fair question, and margin matters. {{ case_study.customer }} is a public example ({{ case_study.label }}{% if case_study.metric_text %}: {{ case_study.metric_text }}{% endif %}). Source: {{ case_study.source_url }}
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  # Replies to the three agency objections. Wording only: no number, no promise. They are the answers the
+  # pillars above give, written as a reply, ready for a router that maps a labelled objection to a template.
+  margin_reply:
+    subject: "Re: {{ original_subject }}"
+    body: |
+      Hi {{ first_name }},
+
+      Margin is the right thing to ask about. I would rather look at how much of the work behind each client
+      campaign is manual before saying anything about it.
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  white_label_reply:
+    subject: "Re: {{ original_subject }}"
+    body: |
+      Hi {{ first_name }},
+
+      On white-label I do not want to guess. I will check with our product team and come back with what is
+      possible.
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  tool_fatigue_reply:
+    subject: "Re: {{ original_subject }}"
+    body: |
+      Hi {{ first_name }},
+
+      Another tool is a fair worry. The aim is to put several steps in one place rather than add another login.
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  meeting_offer:
+    subject: "Re: Running client campaigns at {{ company }}"
+    body: |
+      Hi {{ first_name }},
+
+      Thanks for getting back to me, {{ first_name }}. {{ personalised_line }}
+
+      {{ slots_intro }}
+      {{ slots_text }}
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
+  meeting_confirmation:
+    subject: "Confirmed: {{ slot_text }}"
+    body: |
+      Hi {{ first_name }},
+
+      Confirmed for {{ slot_text }}. A calendar invite is attached.
+
+      {{ sender_name }}
+
+      {{ unsubscribe_line }}
+      {{ postal_address }}
