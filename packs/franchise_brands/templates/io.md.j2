@@ -5,7 +5,9 @@
 Advertiser: {{ advertiser_name }}
 Date: {{ date | default("") }}
 Term: {{ start_date }} to {{ end_date }}
-Signer: {{ signer_name }}, {{ signer_role }}
+Signer: {{ signer_name }}, {{ signer_role }} ({{ signer_email }})
+Budget stated on the discovery call: {{ "{:,.0f}".format(budget_usd) if budget_usd else "not stated" }} USD
+Term: {{ term_months if term_months else "n/a" }} months
 
 | Item | Unit | Quantity | Unit price | Amount |
 |---|---|---|---|---|
@@ -14,4 +16,4 @@ Signer: {{ signer_name }}, {{ signer_role }}
 Discount: {{ discount_pct | default(0) }}%
 **Total: {{ total }}**
 
-Terms: {{ terms | default("Sample terms to be replaced by the real agreement.") }}
+Payment terms: {{ payment_terms }}

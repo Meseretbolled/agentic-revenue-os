@@ -252,6 +252,12 @@ class PolicyPack(Strict):
     veto_window_seconds: int = Field(ge=0)
     send_window: SendWindowConfig
     default_timezone: str = "UTC"
+    # The IO's own limits (SAMPLE numbers: ours, not COOL's). A budget outside the bounds, a term longer
+    # than the maximum, or a discount over max_discount_pct all stop the IO.
+    io_budget_min_usd: float = Field(default=5_000, ge=0)
+    io_budget_max_usd: float = Field(default=2_000_000, gt=0)
+    io_max_term_months: int = Field(default=24, gt=0)
+    io_payment_terms: str = "Net 30 (SAMPLE terms)"
 
     @field_validator("autonomy_levels")
     @classmethod

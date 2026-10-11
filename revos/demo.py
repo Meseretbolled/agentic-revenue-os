@@ -245,14 +245,17 @@ def run_demo(url: str, out: Callable[[str], None] = print) -> DemoReport:
 
         # 9 ------------------------------------------------------------------------------------
         clock.set(datetime(2026, 10, 14, 9, 0, tzinfo=UTC))
-        n.step("the IO: a discount over the maximum is blocked until a manager approves")
+        n.step("the IO: a discount over the maximum is a hard block that nobody can override")
+        conn.execute("UPDATE deals SET fields = fields || %s WHERE id = %s",
+                     (json.dumps({"signer_email": CONTACT}), deal_id))      # the lead record's signer address
         items = [{"id": "multi_location", "quantity": 120}, {"id": "creative_automation", "quantity": 3}]
         orch.set_io_terms(deal_id, items=items, start="2026-11-02", end="2027-02-01", discount_pct=40,
                           actor="deal-desk")
         blocked = orch.handle_io(deal_id)
         n.say(f"IO result: {blocked.status}: {blocked.reason}")
-        orch.approve_discount(deal_id, "regional-manager", 40, "strategic account")
-        n.say("a manager approves 40% for this deal, then the IO is rebuilt")
+        orch.set_io_terms(deal_id, items=items, start="2026-11-02", end="2027-02-01", discount_pct=10,
+                          actor="deal-desk")
+        n.say("the deal desk lowers the discount to 10% (the only way forward), then the IO is rebuilt")
         ready = orch.handle_io(deal_id)
         drain()
         n.say(f"IO result: {ready.status} (policy decision: {ready.decision}); deal is now {stage()}")

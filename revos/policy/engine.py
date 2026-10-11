@@ -43,7 +43,6 @@ class ActionRequest:
     injection_flagged: bool = False
     contact_suppressed: bool = False           # the service overwrites this from the database
     discount_pct: float | None = None
-    discount_approved_pct: float | None = None  # a manager's recorded approval, read from the database
     rate_card_ok: bool | None = None           # from the rate-card skill; None = unknown
     from_library: bool = True                  # case study comes from the curated library
     io_validated: bool | None = None
@@ -81,11 +80,9 @@ def decide(
             blocks.append("injection_flagged")
         if kind in EMAIL_BODY_TYPES and request.claim_check_passed is not True:
             blocks.append("claim_check_failed")
-        ceiling = max(config.max_discount_pct or 0.0, request.discount_approved_pct or 0.0)
+        # A discount over the pack's maximum is a hard block. There is no approval that lifts it.
         if request.discount_pct is not None and (
-            (config.max_discount_pct is None and not request.discount_approved_pct)
-            or request.discount_pct > ceiling
-        ):
+                config.max_discount_pct is None or request.discount_pct > config.max_discount_pct):
             blocks.append("discount_over_maximum")
         if kind == "send_io" and request.io_validated is not True:
             blocks.append("io_validation_failed")

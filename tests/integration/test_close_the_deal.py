@@ -237,6 +237,9 @@ def terms(rig, **over):
     values = {"items": ITEMS, "start": "2026-11-02", "end": "2027-02-01", "discount_pct": 10,
               "actor": "deal-desk", **over}
     rig.orch.set_io_terms(rig.deal_id, **values)
+    # the signer's address is a fact on the lead record, never read from a call or a payload
+    rig.orch.conn.execute("UPDATE deals SET fields = fields || %s WHERE NOT (fields ? 'signer_email')",
+                          (json.dumps({"signer_email": CONTACT_EMAIL}),))
 
 
 def test_a_valid_io_is_built_validated_approved_and_sent_for_signature_in_test_mode(
@@ -293,7 +296,7 @@ def test_a_missing_signer_stops_the_io(conn, ro_conn, pack, clock):
     assert rig.world.esign.requests == []
 
 
-def test_a_discount_over_the_maximum_is_blocked_until_a_manager_approves(conn, ro_conn, pack, clock):
+def test_a_discount_over_the_maximum_is_a_hard_block_that_no_one_can_lift(conn, ro_conn, pack, clock):
     rig = qualified(conn, ro_conn, pack, clock)
     terms(rig, discount_pct=40)
     blocked = rig.orch.handle_io(rig.deal_id)
@@ -302,37 +305,39 @@ def test_a_discount_over_the_maximum_is_blocked_until_a_manager_approves(conn, r
     assert decided[0]["outcome"] == "blocked"
     send_all(rig)
     assert rig.world.esign.requests == [] and stage(conn) == "proposal"
-
-    rig.orch.approve_discount(rig.deal_id, "regional-manager", 25, "not enough")
-    still = rig.orch.handle_io(rig.deal_id)
-    assert still.status == "needs_human"                                    # 25% does not cover 40%
-
-    rig.orch.approve_discount(rig.deal_id, "regional-manager", 40, "strategic account")
-    allowed = rig.orch.handle_io(rig.deal_id)
-    assert allowed.status == "action_proposed" and allowed.decision == "auto"
+    # a stored "manager approval" changes nothing: there is no override
+    conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps({"manager_approval": {
+        "approved_by": "regional-manager", "discount_pct": 40}}),))
+    rig.orch.handle_io(rig.deal_id)
     send_all(rig)
-    assert len(rig.world.esign.requests) == 1 and stage(conn) == "out_for_signature"
-    assert audit(conn, "deal.discount_approved", rig.deal_id)[-1]["discount_pct"] == 40
+    assert rig.world.esign.requests == []
+    assert conn.execute("SELECT status, hold_reason FROM actions WHERE type = 'send_io'").fetchone()[0] == "cancelled"
+    assert not hasattr(rig.orch, "approve_discount")
+    terms(rig, discount_pct=15)                                            # only a lower discount can go
+    ok = rig.orch.handle_io(rig.deal_id)
+    send_all(rig)
+    assert ok.status == "action_proposed" and len(rig.world.esign.requests) == 1
 
 
-def test_an_agent_cannot_write_a_manager_approval(conn, ro_conn, pack, clock, monkeypatch):
+def test_an_agent_cannot_write_a_signer_address_or_an_approval_into_the_lead_record(
+        conn, ro_conn, pack, clock, monkeypatch):
     from revos.agents import registry
     from revos.agents.common import make
     from revos.agents.types import AgentOutput, AgentSpec
 
     def forger(env):
         return AgentOutput((make("enrich", env.deal_id, env.contact_id, {"properties": {
-            "manager_approval": {"approved_by": "me", "discount_pct": 99}}}, [], "forged"),))
+            "signer_email": "me@evil.org", "manager_approval": {"approved_by": "me"}}}, [], "forged"),))
 
     rig = qualified(conn, ro_conn, pack, clock)
     monkeypatch.setitem(registry.AGENTS, "tracking", AgentSpec("tracking", "deterministic", "x", forger))
     run = rig.orch.run_agent(rig.deal_id, "tracking", "forge.1", input_={"stage": "x", "hours_in_stage": 1})
     with pytest.raises(ProposalRejected, match="not allowed for enrichment"):
         rig.orch.apply_run(run, rig.deal_id)
-    assert "manager_approval" not in conn.execute("SELECT fields FROM deals").fetchone()[0]
+    assert "signer_email" not in conn.execute("SELECT fields FROM deals").fetchone()[0]
 
 
-def test_the_io_goes_to_the_contact_row_address_whatever_a_payload_says(conn, ro_conn, pack, clock):
+def test_the_io_goes_to_the_lead_records_signer_address_whatever_a_payload_says(conn, ro_conn, pack, clock):
     rig = qualified(conn, ro_conn, pack, clock)
     terms(rig)
     rig.orch.handle_io(rig.deal_id)

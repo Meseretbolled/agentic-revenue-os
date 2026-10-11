@@ -5,7 +5,7 @@ import pytest
 from revos.domain.stages import DealStage
 from revos.segments.schema import Extractor
 from revos.skills.extraction import extract_fields
-from revos.skills.io import manager_ceiling, render_io, validate_io
+from revos.skills.io import parse_budget_usd, render_io, validate_io
 
 NUMBER = Extractor(field="location_count", kind="number", pattern=r"(\d[\d,]*)\s+locations")
 KEYWORD = Extractor(field="industry", kind="keyword", map={"optical": ["eye-care"], "auto": ["dealership"]})
@@ -44,8 +44,9 @@ def test_extractor_shapes_are_validated() -> None:
         Extractor(field="x", kind="flag", any=[])
 
 
-BASE = {"budget": "50k", "timeline": "Q1", "decision_maker": "Dana", "needs": "local",
-        "signer_name": "Priya Nair", "signer_role": "Head of Finance",
+BASE = {"budget": "Our budget is about $50,000 for the first quarter.", "timeline": "Q1",
+        "decision_maker": "Dana", "needs": "local",
+        "signer_name": "Priya Nair", "signer_role": "Head of Finance", "signer_email": "signer@fictional.example",
         "io_start_date": "2026-11-02", "io_end_date": "2027-02-01",
         "io_items": [{"id": "multi_location", "quantity": 120}, {"id": "creative_automation", "quantity": 3}]}
 
@@ -76,6 +77,12 @@ def test_a_discount_up_to_the_maximum_is_fine_and_reduces_the_total(pack) -> Non
     ({"budget": ""}, "missing deal field: budget"),
     ({"signer_name": ""}, "missing deal field: signer_name"),
     ({"signer_role": None}, "missing deal field: signer_role"),
+    ({"signer_email": ""}, "missing deal field: signer_email"),
+    ({"signer_email": "not-an-address"}, "signer_email is not an email address"),
+    ({"budget": "We have not decided yet."}, "no dollar amount could be read"),
+    ({"budget": "Our budget is about $400."}, "outside the pack's bounds"),
+    ({"budget": "Our budget is about ten million dollars."}, "outside the pack's bounds"),
+    ({"io_end_date": "2029-01-01"}, "longer than the maximum of 24 months"),
     ({"io_start_date": ""}, "missing deal field: io_start_date"),
     ({"io_start_date": "11/02/2026"}, "io_start_date is not a valid date"),
     ({"io_end_date": "2027-02-30"}, "io_end_date is not a valid date"),
@@ -94,19 +101,38 @@ def test_a_matching_quoted_price_is_accepted(pack) -> None:
 
 def test_several_problems_are_all_reported(pack) -> None:
     result = check(pack, signer_name="", discount_pct=50, io_end_date="nonsense")
-    assert len(result.problems) == 3 and result.needs_manager_approval
+    assert len(result.problems) == 3 and result.hard_block
 
 
-def test_an_over_maximum_discount_needs_a_managers_approval_to_pass(pack) -> None:
+def test_an_over_maximum_discount_is_a_hard_block_that_nothing_can_lift(pack) -> None:
     over = check(pack, discount_pct=40)
-    assert not over.ok and over.needs_manager_approval and len(over.problems) == 1
-    approved = check(pack, discount_pct=40, manager_approval={"approved_by": "mgr", "discount_pct": 40})
-    assert approved.ok and not approved.needs_manager_approval
-    too_small = check(pack, discount_pct=40, manager_approval={"approved_by": "mgr", "discount_pct": 25})
-    assert not too_small.ok
-    anonymous = check(pack, discount_pct=40, manager_approval={"discount_pct": 40})
-    assert not anonymous.ok and manager_ceiling({"manager_approval": {"discount_pct": 40}}) == 0.0
-    assert manager_ceiling({"manager_approval": {"approved_by": "m", "discount_pct": 30}}) == 30.0
+    assert not over.ok and over.hard_block and len(over.problems) == 1 and "HARD BLOCK" in over.problems[0]
+    for approval in ({"approved_by": "mgr", "discount_pct": 40}, {"approved_by": "ceo", "discount_pct": 99}):
+        assert not check(pack, discount_pct=40, manager_approval=approval).ok          # a stored approval is ignored
+    assert check(pack, discount_pct=15).ok and not check(pack, discount_pct=15).hard_block
+
+
+def test_the_signer_address_must_be_on_the_allowlist_when_one_applies(pack) -> None:
+    allowed = {"signer@fictional.example"}
+    assert validate_io(pack, BASE, today=TODAY, signer_allowed=lambda e: e in allowed).ok
+    blocked = validate_io(pack, {**BASE, "signer_email": "x@evil.org"}, today=TODAY,
+                          signer_allowed=lambda e: e in allowed)
+    assert not blocked.ok and "not on the recipient allowlist" in blocked.problems[0]
+
+
+@pytest.mark.parametrize("text,amount", [
+    ("Our budget is about $40,000 a month across all locations.", 40000),
+    ("about 50k for the quarter", 50000), ("$1.5m this year", 1_500_000),
+    ("Our budget is about two hundred thousand dollars for the first year.", 200000),
+    ("fifty thousand dollars", 50000), ("one million dollars", 1_000_000),
+    ("no number here", None), ("", None), (None, None)])
+def test_a_budget_amount_is_read_from_the_quote(text, amount) -> None:
+    assert parse_budget_usd(text) == amount
+
+
+def test_the_validation_reports_the_budget_and_the_term(pack) -> None:
+    result = check(pack)
+    assert result.budget_usd == 50000 and result.term_months == 3.0 and "SAMPLE" in result.payment_terms
 
 
 def test_the_rendered_io_carries_the_sample_label_the_terms_and_the_signer(pack) -> None:
@@ -114,7 +140,8 @@ def test_the_rendered_io_carries_the_sample_label_the_terms_and_the_signer(pack)
     text = render_io(pack, "Acme", validate_io(pack, fields, today=TODAY), fields, "IO-1", "2026-10-12")
     assert "SAMPLE" in text and "Acme" in text and "Total: 12300.0" in text
     assert "DCO and Creative Automation" in text and "2026-11-02 to 2027-02-01" in text
-    assert "Priya Nair, Head of Finance" in text
+    assert "Priya Nair, Head of Finance" in text and "signer@fictional.example" in text
+    assert "Payment terms:" in text and "50,000" in text
 
 
 def test_exit_criteria_for_io_come_from_the_pack(pack) -> None:

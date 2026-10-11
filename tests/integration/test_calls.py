@@ -155,12 +155,13 @@ def test_a_calls_participant_email_wins_over_a_misleading_title(conn, ro_conn, p
 def test_a_signer_name_from_a_call_never_becomes_a_recipient(conn, ro_conn, pack, clock):
     rig = qualified(conn, ro_conn, pack, clock)                 # the call names Priya Nair
     f = fields(conn)
-    assert f["signer_name"] == "Priya Nair" and "signer_email" not in f
-    terms(rig)
+    assert f["signer_name"] == "Priya Nair" and "signer_email" not in f        # the call gave a name only
+    terms(rig)                                                                  # the lead record's signer_email
     rig.orch.handle_io(rig.deal_id)
     send_all(rig)
     request = rig.world.esign.requests[0]
-    assert request.signer_name == "Priya Nair" and request.signer_email == CONTACT      # the contact row
+    assert request.signer_name == "Priya Nair" and request.signer_email == CONTACT
+    assert "priya@elsewhere.example" not in json.dumps(fields(conn))
 
 
 def test_the_signer_address_comes_from_the_lead_record_and_the_allowlist_still_applies(
@@ -177,7 +178,15 @@ def test_a_signer_address_outside_the_allowlist_is_refused(conn, ro_conn, pack, 
     rig = qualified(conn, ro_conn, pack, clock)
     conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps({"signer_email": "stranger@evil.org"}),))
     terms(rig)
+    result = rig.orch.handle_io(rig.deal_id)                  # validation refuses it before anything is queued
+    send_all(rig)
+    assert result.status == "needs_human" and "not on the recipient allowlist" in result.reason
+    assert rig.world.esign.requests == []
+    # and even an action that got past validation is stopped by the gate
+    conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps({"signer_email": CONTACT}),))
+    terms(rig)
     rig.orch.handle_io(rig.deal_id)
+    conn.execute("UPDATE deals SET fields = fields || %s", (json.dumps({"signer_email": "stranger@evil.org"}),))
     send_all(rig)
     assert rig.world.esign.requests == []
     assert conn.execute("SELECT hold_reason, status FROM actions WHERE type = 'send_io'").fetchone() == (

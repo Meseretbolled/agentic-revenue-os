@@ -47,7 +47,7 @@ from revos.policy.audit import write_audit
 from revos.policy.config import PolicyConfig
 from revos.policy.engine import ActionRequest
 from revos.policy.gate import GateResult, run_approved_action
-from revos.policy.recipients import base_of
+from revos.policy.recipients import base_of, recipient_allowed
 from revos.policy.service import propose_action, release_veto_expired
 from revos.policy.settings import release_held_sends
 from revos.ports.calendar import Calendar, Slot
@@ -65,7 +65,7 @@ from revos.skills.call_matching import DealFacts, match_call
 from revos.skills.claims import deterministic_check
 from revos.skills.crm_fields import call_summary, outreach_status, sequence_day
 from revos.skills.handoff import build_handoff
-from revos.skills.io import manager_ceiling, validate_io
+from revos.skills.io import validate_io
 from revos.skills.scoring import score_lead
 from revos.skills.slots import resolve_tz, slot_text
 from revos.slack.notifier import POSTED_TYPES
@@ -86,7 +86,7 @@ FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
 EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role", "signer_name",
                 "signer_role"}
 # What the IO is built from: a change to any of these is a new IO run.
-IO_KEYS = ("io_items", "io_start_date", "io_end_date", "discount_pct", "manager_approval",
+IO_KEYS = ("io_items", "io_start_date", "io_end_date", "discount_pct", "signer_email",
            "signer_name", "signer_role", "budget", "timeline", "decision_maker", "needs")
 QUALIFICATION_KEYS = ("budget", "timeline", "decision_maker", "needs", "signer_name", "signer_role")
 DEFAULT_SNOOZE_DAYS = 3        # no return date stated: look again after this long
@@ -390,13 +390,14 @@ class Orchestrator:
             return ActionRequest(atype, tier=tier, body=str(payload.get("body", "")),
                                  claim_check_passed=self._recheck_claims(deal, pack, payload))
         if atype == "send_io":
-            check = validate_io(pack, fields, today=self.clock.now().date())
-            if not check.ok and not check.needs_manager_approval:
+            check = validate_io(pack, fields, today=self.clock.now().date(),
+                                signer_allowed=self._signer_allowed())
+            if not check.ok and not (check.hard_block and len(check.problems) == 1):
                 # recomputed from the database; the agent's word is not enough
                 raise ProposalRejected("the IO does not validate: " + "; ".join(check.problems))
-            return ActionRequest(
-                atype, io_validated=True, discount_pct=float(fields.get("discount_pct", 0) or 0),
-                discount_approved_pct=manager_ceiling(fields) or None)
+            # a discount over the maximum is proposed on purpose: the policy engine hard-blocks it
+            return ActionRequest(atype, io_validated=True,
+                                 discount_pct=float(fields.get("discount_pct", 0) or 0))
         if atype == "book_meeting":
             if payload.get("start") not in (fields.get("offered_slots") or []):
                 raise ProposalRejected("the time is not one we offered")
@@ -405,6 +406,12 @@ class Orchestrator:
             return ActionRequest(atype, from_library=any(
                 c.id == payload.get("case_study_id") for c in pack.case_studies))
         return ActionRequest(atype)
+
+    def _signer_allowed(self):
+        """The recipient allowlist, as a test of one address (demo mode only)."""
+        if not self.demo_mode:
+            return None
+        return lambda email: recipient_allowed(email, self.allowed_recipients, self.plus_bases)
 
     def _recheck_claims(self, deal: Mapping[str, Any], pack: Pack, payload: Mapping[str, Any]) -> bool:
         """The orchestrator re-runs the code checks on the draft against the DATABASE's facts."""
@@ -661,13 +668,6 @@ class Orchestrator:
                                      "discount_pct": discount_pct})
         write_audit(self.conn, actor, "deal.io_terms_set", deal_id,
                     {"items": items, "start": start, "end": end, "discount_pct": discount_pct})
-
-    def approve_discount(self, deal_id: UUID, manager: str, discount_pct: float, reason: str) -> None:
-        self._merge_fields(deal_id, {"manager_approval": {
-            "approved_by": manager, "discount_pct": discount_pct, "reason": reason,
-            "at": self.clock.now().isoformat()}})
-        write_audit(self.conn, manager, "deal.discount_approved", deal_id,
-                    {"discount_pct": discount_pct, "reason": reason})
 
     # --- the qualification gate -------------------------------------------------------------------
     def run_qualification_gate(self, deal_id: UUID) -> PipelineResult:

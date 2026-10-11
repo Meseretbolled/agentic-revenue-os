@@ -371,8 +371,9 @@ def test_meeting_with_no_free_slots_goes_to_a_person(conn, ro_conn, pack, clock)
 
 
 def _io_fields(**extra):
-    return json.dumps({"budget": "50k", "timeline": "Q1", "decision_maker": "Dana", "needs": "local",
-                       "signer_name": "Priya Nair", "signer_role": "Head of Finance",
+    return json.dumps({"budget": "Our budget is about $50,000 for the first quarter.", "timeline": "Q1",
+                       "decision_maker": "Dana", "needs": "local", "signer_name": "Priya Nair",
+                       "signer_role": "Head of Finance", "signer_email": "sam.lee@brightside-optical.example",
                        "io_start_date": "2026-11-02", "io_end_date": "2027-02-01",
                        "io_items": [{"id": "multi_location", "quantity": 120},
                                     {"id": "creative_automation", "quantity": 3}], **extra})
@@ -401,7 +402,7 @@ def test_an_io_with_a_discount_over_the_maximum_is_blocked_by_the_policy_engine(
     assert status == "cancelled" and "discount_over_maximum" in why
     assert rig.world.esign.requests == []
     doc = conn.execute("SELECT validation FROM documents").fetchone()[0]
-    assert doc["ok"] is False and "needs a manager's approval" in doc["problems"][0]
+    assert doc["ok"] is False and "HARD BLOCK" in doc["problems"][0]
 
 
 def test_an_io_that_fails_validation_is_stored_for_a_person_and_never_proposed_for_signature(

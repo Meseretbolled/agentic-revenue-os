@@ -23,7 +23,7 @@ def run(env: AgentEnv) -> AgentOutput:
                                        "line_items": list(validation.line_items),
                                        "discount_pct": fields.get("discount_pct", 0) or 0},
                  [], "IO draft built from deal data")
-    only_discount = validation.needs_manager_approval and len(validation.problems) == 1
+    only_discount = validation.hard_block and len(validation.problems) == 1
     if not validation.ok and not only_discount:
         return AgentOutput((build,), handoff="IO validation failed: " + "; ".join(validation.problems))
     send = make("send_io", d, c, {
@@ -31,5 +31,5 @@ def run(env: AgentEnv) -> AgentOutput:
         "signer_name": fields["signer_name"], "signer_role": fields["signer_role"],
         "total": validation.total, "discount_pct": fields.get("discount_pct", 0) or 0},
         [], "IO validated; ready for signature" if validation.ok
-        else "discount above the maximum; needs a manager")
+        else "discount above the maximum: a hard block, it will not be sent")
     return AgentOutput((build, send))
