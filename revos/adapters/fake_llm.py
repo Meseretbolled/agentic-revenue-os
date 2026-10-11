@@ -10,6 +10,7 @@ from collections import deque
 from collections.abc import Sequence
 
 from revos.domain.drafting import Draft, Evidence
+from revos.domain.quoted import new_text, quote_around
 from revos.domain.untrusted import UntrustedText
 from revos.ports.llm import (
     CallExtraction,
@@ -83,11 +84,13 @@ class FakeLLM:
         self._enter("classify_reply")
         block = reply.for_model()
         self.prompts.append(block)
-        text = block.casefold()
+        fresh = new_text(block)               # never classify our own quoted words
+        text = fresh.casefold()
         for label, needles in _REPLY_RULES:
             hit = next((n for n in needles if n in text), None)
             if hit:
-                return ReplyClassification(label, 0.9, f"matched '{hit}'")  # type: ignore[arg-type]
+                return ReplyClassification(label, 0.9, f"matched '{hit}'",  # type: ignore[arg-type]
+                                           quote_around(fresh, hit))
         return ReplyClassification("question", 0.3, "no rule matched")
 
     def extract_call_fields(self, transcript: UntrustedText, wanted: Sequence[str]) -> CallExtraction:

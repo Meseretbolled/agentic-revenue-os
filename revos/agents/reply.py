@@ -27,7 +27,10 @@ def run(env: AgentEnv) -> AgentOutput:
     message_id = env.input.get("message_id")
     proposals = [make("classify_reply", d, c, {
         "message_id": message_id, "label": label, "confidence": triage.classification.confidence,
-        "rationale": triage.classification.rationale}, [], f"reply classified as {label}")]
+        "rationale": triage.classification.rationale,
+        "evidence_quote": triage.classification.quote},
+        [], f"reply classified as {label}"
+        + (f': "{triage.classification.quote}"' if triage.classification.quote else ""))]
     stage = _STAGE_FOR.get(label, DealStage.REPLIED)
     handoff = None
 

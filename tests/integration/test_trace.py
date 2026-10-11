@@ -19,7 +19,8 @@ def full_slice(conn, ro_conn, pack, clock):
     assert rig.orch.send_action(first.action_id).status == "sent"
     rig.orch.handle_reply(rig.deal_id, InboundEmail(
         "<in1@x>", "sam.lee@brightside-optical.example", "me@x", "Re: hello",
-        "Your pricing is too expensive for us", clock.now()))
+        "Your pricing is too expensive for us. Our CFO reviews every vendor in the second quarter.",
+        clock.now()))
     return rig
 
 
@@ -54,7 +55,9 @@ def test_the_timeline_has_each_stage_policy_decision_outbox_action_and_email(con
 def test_the_timeline_never_contains_a_message_body(conn, ro_conn, pack, clock):
     rig = full_slice(conn, ro_conn, pack, clock)
     body = conn.execute("SELECT body FROM messages WHERE direction = 'inbound'").fetchone()[0]
-    assert body and body not in "\n".join(e.line() for e in timeline(conn, str(rig.deal_id)))
+    text = "\n".join(e.line() for e in timeline(conn, str(rig.deal_id)))
+    assert body and body not in text and "CFO reviews" not in text      # no body; only the evidence quote
+    assert '"Your pricing is too expensive for us."' in text
 
 
 def test_lessons_used_and_held_replies_appear_with_their_ids(conn, ro_conn, pack, clock):

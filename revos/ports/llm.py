@@ -17,6 +17,7 @@ class ReplyClassification:
     label: ReplyLabel
     confidence: float
     rationale: str
+    quote: str = ""            # the words in the reply that justify the label
 
 
 @dataclass(frozen=True)

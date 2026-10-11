@@ -36,6 +36,7 @@ from revos.domain.errors import (
     ToolCallBlocked,
     WebhookRejected,
 )
+from revos.domain.quoted import new_text
 from revos.domain.stages import DealStage, can_transition
 from revos.domain.untrusted import UntrustedText
 from revos.mcp.registry import BlockEvent, ToolContext
@@ -76,6 +77,7 @@ HUMAN_CAUSES: tuple[tuple[type[Exception], str], ...] = (
 )
 INTERNAL = {"enrich", "score", "classify_reply", "suppress_contact", "cancel_scheduled_sends",
             "snooze_ooo", "reminder", "attach_case_study", "generate_io", "lesson_write"}
+WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 PLUS_TAG = re.compile(r"\+([0-9a-f]{8})@")
 SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note", "book_meeting", "handoff"}
 FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
@@ -141,11 +143,20 @@ class Orchestrator:
         self.inbox, self.crm_sync, self.daily_cap = inbox, crm_sync, daily_cap
         self.store = RunStore(conn)
 
-    def _slots(self) -> tuple[Slot, ...]:
+    def _slots(self, reply_text: str = "") -> tuple[Slot, ...]:
+        """Three free slots. If the reply names a weekday ("can we talk Thursday?"), offer slots on
+        that day when any are free; otherwise fall back to the next free ones and say so in the audit."""
         if self.calendar is None:
             return ()
         now = self.clock.now()
-        return tuple(self.calendar.free_slots(now + timedelta(days=1), now + timedelta(days=8), 30)[:3])
+        free = self.calendar.free_slots(now + timedelta(days=1), now + timedelta(days=8), 30)
+        wanted = {i for i, name in enumerate(WEEKDAY_NAMES) if re.search(rf"\b{name}s?\b",
+                                                                        new_text(reply_text), re.I)}
+        preferred = [s for s in free if s.start.weekday() in wanted]
+        if wanted and not preferred:
+            write_audit(self.conn, "orchestrator", "slots.preference_unmet", None,
+                        {"reason": "no free slot on the weekday the reply asked for"})
+        return tuple((preferred or free)[:3])
 
     def _last_outbound_subject(self, deal_id: UUID) -> str | None:
         row = self.conn.execute("SELECT subject FROM messages WHERE deal_id = %s AND direction = "
@@ -834,12 +845,15 @@ class Orchestrator:
             self.apply_run(run, deal_id)
             label = next((p["payload"]["label"] for p in run.proposals
                           if p["action_type"] == "classify_reply"), None)
+            self._note_reply(deal_id, email, label, next(
+                (p["payload"].get("evidence_quote", "") for p in run.proposals
+                 if p["action_type"] == "classify_reply"), ""))
             if run.output.get("stage_suggestion"):
                 self.advance(deal_id, DealStage(run.output["stage_suggestion"]), f"reply: {label}")
             already_booked = "meeting_start" in (self._deal(deal_id)["fields"] or {})
             if label == "interested" and not already_booked:   # route: offer meeting times
                 meeting = self.run_agent(deal_id, "meeting", f"meeting:{email.message_id}",
-                                         slots=self._slots())
+                                         slots=self._slots(email.body))
                 runs.append(("meeting", meeting.status))
                 if meeting.status != "completed":
                     return done("needs_human", meeting.human_reason, label)
@@ -852,6 +866,12 @@ class Orchestrator:
             return done("completed", None, label)
         except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
             return done("needs_human", f"{cause_of(exc)}: {exc}")
+
+    def _note_reply(self, deal_id: UUID, email: Any, label: str | None, quote: str) -> None:
+        """A CRM note for a reply: how it was classified, the evidence, and the new text only."""
+        text = (f"Reply received: {email.subject}\nClassified as: {label}"
+                + (f' (evidence: "{quote}")' if quote else "") + f"\n\n{new_text(email.body)[:800]}")
+        self._crm_note(deal_id, f"{deal_id}:reply-note:{email.message_id}", text)
 
     # --- HubSpot: its own actions, so a CRM failure never touches an email and vice versa ----------------
     def _crm_action(self, deal_id: UUID, contact_id: UUID | None, key: str, type_: str,
