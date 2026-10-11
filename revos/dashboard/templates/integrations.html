@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Integrations{% endblock %}
+{% block body %}
+<h1>Integrations</h1>
+<p class="muted">REAL means the live service is used (a key is present). MOCK means an offline stand-in. Keys are never shown.
+  {% if checking %}<strong>Checking the services now…</strong>{% endif %}</p>
+<section class="card"><table class="t"><thead><tr><th>Service</th><th>Mode</th><th>Health</th><th>Notes</th></tr></thead><tbody>
+{% for r in rows %}<tr><td><strong>{{ r.service }}</strong></td>
+  <td><span class="chip {{ 'real' if r.mode == 'REAL' else 'mock' }}">{{ r.mode }}</span></td>
+  <td>{% if r.status %}<span class="chip {{ 'auto' if 'OK' in r.status else 'warn' if 'MOCK' in r.status else 'bad' }}">{{ r.status }}</span> <span class="muted small">{{ r.detail|mask }}</span>{% else %}<span class="muted">-</span>{% endif %}</td>
+  <td class="muted">{{ r.why }}{% if not r.built %} · adapter not built yet{% endif %}</td></tr>{% endfor %}
+</tbody></table></section>
+
+<section class="card"><h2>Model spend</h2>
+  <p><strong>${{ '%.4f'|format(spend.usd) }}</strong> of <strong>${{ '%.2f'|format(cap) }}</strong> (LLM_MAX_SPEND_USD)
+     · {{ spend.calls }} calls · {{ '{:,}'.format(spend.tokens_in) }} tokens in / {{ '{:,}'.format(spend.tokens_out) }} out</p>
+  <progress class="meter" value="{{ pct }}" max="100">{{ pct }}%</progress>
+</section>
+{% endblock %}

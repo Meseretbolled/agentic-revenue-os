@@ -219,6 +219,28 @@ def call_demo() -> None:
     call_demo_main()
 
 
+@app.command("dashboard-seed")
+def dashboard_seed(clear: bool = typer.Option(False, "--clear", help="remove demo deals instead")) -> None:
+    """Insert clearly marked demo deals for the dashboard (rows only: nothing is queued or sent)."""
+    from revos.adapters.clock import SystemClock
+    from revos.db import migrate
+    from revos.env import load_env_file
+    from revos.orchestrator.dashboard_demo import clear_demo, seed_demo
+    from revos.segments import load_all
+    load_env_file()
+    packs = load_all("packs")
+    pack = next(p for p in packs.values() if p.meta.demo)
+    segment = pack.id
+    with connect() as conn:
+        conn.autocommit = True
+        migrate(conn)
+        if clear:
+            typer.echo(f"removed {clear_demo(conn)} demo deal(s); the audit log keeps its rows")
+        else:
+            made = seed_demo(conn, SystemClock(), segment, pack.rate_card)
+            typer.echo(f"created {made} demo deal(s)" if made else "demo deals are already there")
+
+
 @app.command("doctor")
 def doctor() -> None:
     """One status per service: REAL OK, REAL FAILED (with a reason category) or MOCK, and what it

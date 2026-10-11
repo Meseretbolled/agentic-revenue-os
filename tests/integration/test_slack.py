@@ -268,7 +268,7 @@ def test_the_same_payload_delivered_twice_does_nothing_the_second_time_and_answe
 
 def test_a_replayed_approval_does_not_approve_twice(conn, ro_conn, pack, clock, test_db_url):
     s = slack_rig(conn, ro_conn, pack, clock, test_db_url)
-    conn.execute("UPDATE settings SET value = '\"approval\"' WHERE key = 'autonomy_mode'")
+    conn.execute("UPDATE system_settings SET value = '\"approval\"' WHERE key = 'autonomy_mode'")
     action = s.hot_first_touch()
     s.drain()
     s.press("approve", action, trigger="t-approve")
@@ -316,7 +316,7 @@ def test_a_forged_approve_for_an_action_that_is_not_awaiting_approval_does_nothi
 
 def test_approval_mode_posts_approve_and_reject_and_the_buttons_work(conn, ro_conn, pack, clock, test_db_url):
     s = slack_rig(conn, ro_conn, pack, clock, test_db_url)
-    conn.execute("UPDATE settings SET value = '\"approval\"' WHERE key = 'autonomy_mode'")
+    conn.execute("UPDATE system_settings SET value = '\"approval\"' WHERE key = 'autonomy_mode'")
     action = s.hot_first_touch()
     s.drain()
     (post,) = s.slack.posts
@@ -333,7 +333,7 @@ def test_approval_mode_posts_approve_and_reject_and_the_buttons_work(conn, ro_co
 
 def test_reject_in_slack_cancels_for_good(conn, ro_conn, pack, clock, test_db_url):
     s = slack_rig(conn, ro_conn, pack, clock, test_db_url)
-    conn.execute("UPDATE settings SET value = '\"approval\"' WHERE key = 'autonomy_mode'")
+    conn.execute("UPDATE system_settings SET value = '\"approval\"' WHERE key = 'autonomy_mode'")
     action = s.hot_first_touch()
     s.drain()
     s.press("reject", action, user="UBOSS")

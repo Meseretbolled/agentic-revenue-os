@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Pending{% endblock %}
+{% block body %}
+<h1>Pending</h1>
+
+<section class="card"><h2>In the veto window <span class="count">{{ veto|length }}</span></h2>
+  <p class="muted">These send by themselves when the timer ends. Cancel stops them.</p>
+  {% for a in veto %}
+  <div class="row">
+    <div><strong>{{ a.type.replace('_', ' ') }}</strong> · <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'deal' }}</a>
+      <div class="muted small">{{ a.subject }}</div></div>
+    <div class="right"><span class="countdown big" data-until="{{ a.veto_until.isoformat() }}"></span>
+      <form method="post" action="/dashboard/actions/{{ a.id }}/cancel">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Cancel send</button></form></div>
+  </div>
+  {% else %}<p class="muted">Nothing is counting down.</p>{% endfor %}
+</section>
+
+<section class="card"><h2>Waiting for approval <span class="count">{{ approval|length }}</span></h2>
+  {% for a in approval %}
+  <div class="row">
+    <div><strong>{{ a.type.replace('_', ' ') }}</strong> · <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'deal' }}</a>
+      <div class="muted small">{{ a.subject }}</div></div>
+    <div class="right inline">
+      <form method="post" action="/dashboard/actions/{{ a.id }}/approve"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="primary">Approve</button></form>
+      <form method="post" action="/dashboard/actions/{{ a.id }}/reject"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Reject</button></form>
+    </div>
+  </div>
+  {% else %}<p class="muted">Nothing needs a decision.</p>{% endfor %}
+</section>
+
+<section class="card"><h2>Blocked by policy <span class="count">{{ blocked|length }}</span></h2>
+  <p class="muted">Hard blocks never send and have no button: no one can approve them from here.</p>
+  {% for a in blocked %}
+  <div class="row">
+    <div><strong>{{ a.type.replace('_', ' ') }}</strong> · <a href="/dashboard/deals/{{ a.deal_id }}">{{ a.company or 'deal' }}</a>
+      <div class="muted small">{{ a.subject }}</div></div>
+    <div class="right"><span class="chip warn">blocked</span> <span class="muted small">{{ a.why or 'policy' }}</span></div>
+  </div>
+  {% else %}<p class="muted">Nothing blocked recently.</p>{% endfor %}
+</section>
+{% endblock %}

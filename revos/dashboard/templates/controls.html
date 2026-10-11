@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Controls{% endblock %}
+{% block refresh %}0{% endblock %}
+{% block body %}
+<h1>Controls</h1>
+<p class="muted">These switches are stored in the database and read by the policy engine on every decision, so they take effect
+  at once and need no restart. Each change is recorded in the audit log with who made it.</p>
+
+<section class="card">
+  <div class="head"><h2>Kill switch</h2>
+    <div><span class="chip {{ 'bad' if c.kill_switch.value else 'auto' }}">{{ 'ON: sending stopped' if c.kill_switch.value else 'off' }}</span></div></div>
+  <p class="muted small">Effective from: {{ c.kill_switch.source }}{% if c.kill_switch.updated_by %} · set by {{ c.kill_switch.updated_by }} at {{ c.kill_switch.updated_at|when }}{% endif %}</p>
+  <p>On: no email or message is sent (they are held). Off: held sends go back on the queue and pass every check again.</p>
+  <form method="post" action="/dashboard/controls/kill" data-confirm="{{ 'Turn the kill switch off and release held sends?' if c.kill_switch.value else 'Turn the kill switch ON and stop all sending?' }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="on" value="{{ 0 if c.kill_switch.value else 1 }}">
+    <button class="{{ 'primary' if c.kill_switch.value else 'danger' }}">{{ 'Turn off and release held sends' if c.kill_switch.value else 'Turn ON (stop all sending)' }}</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="head"><h2>Autonomy mode</h2><div><span class="chip">{{ c.autonomy_mode.value }}</span></div></div>
+  <p class="muted small">Effective from: {{ c.autonomy_mode.source }}{% if c.autonomy_mode.updated_by %} · set by {{ c.autonomy_mode.updated_by }} at {{ c.autonomy_mode.updated_at|when }}{% endif %}</p>
+  <p><strong>approval</strong>: every send that would go after a veto window waits for a person's Approve instead.
+     <strong>autonomous</strong>: those sends go by themselves after the veto window. Hard blocks apply in both.</p>
+  <form method="post" action="/dashboard/controls/mode" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <select name="mode"><option value="approval" {{ 'selected' if c.autonomy_mode.value == 'approval' }}>approval</option>
+      <option value="autonomous" {{ 'selected' if c.autonomy_mode.value == 'autonomous' }}>autonomous</option></select>
+    <button class="primary">Save</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="head"><h2>Veto window</h2><div><span class="chip">{{ c.veto_window_seconds.value }} seconds</span></div></div>
+  <p class="muted small">Effective from: {{ c.veto_window_seconds.source }}{% if c.veto_window_seconds.updated_by %} · set by {{ c.veto_window_seconds.updated_by }} at {{ c.veto_window_seconds.updated_at|when }}{% endif %}</p>
+  <p>How long a send waits, cancellable, before it goes. Applies to actions created from now on. 5 to 3600 seconds; leave empty to
+     hand control back to the environment.</p>
+  <form method="post" action="/dashboard/controls/veto" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="seconds" inputmode="numeric" placeholder="seconds" value="{{ c.veto_window_seconds.value if c.veto_window_seconds.source == 'database' else '' }}">
+    <button class="primary">Save</button>
+  </form>
+</section>
+{% endblock %}

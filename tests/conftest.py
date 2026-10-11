@@ -37,11 +37,12 @@ def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
         tables = [r[0] for r in c.execute(
             "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
-            "AND tablename NOT IN ('schema_migrations', 'settings')")]
+            "AND tablename NOT IN ('schema_migrations', 'system_settings')")]
         c.execute("TRUNCATE " + ", ".join(tables) + " RESTART IDENTITY CASCADE")
         c.execute("INSERT INTO segments (id, pack_version) VALUES ('test_seg', '1')")
-        c.execute("UPDATE settings SET value = 'false' WHERE key = 'kill_switch'")
-        c.execute("UPDATE settings SET value = '\"autonomous\"' WHERE key = 'autonomy_mode'")
+        c.execute("DELETE FROM system_settings WHERE key = 'veto_window_seconds'")
+        c.execute("UPDATE system_settings SET value = 'false' WHERE key = 'kill_switch'")
+        c.execute("UPDATE system_settings SET value = '\"autonomous\"' WHERE key = 'autonomy_mode'")
         yield c
 
 

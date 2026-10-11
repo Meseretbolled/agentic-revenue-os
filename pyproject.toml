@@ -34,7 +34,7 @@ revos = "revos.cli.main:app"
 include = ["revos*"]
 
 [tool.setuptools.package-data]
-revos = ["adapters/mock/fixtures/*.yaml"]
+revos = ["adapters/mock/fixtures/*.yaml", "dashboard/templates/*.html", "dashboard/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

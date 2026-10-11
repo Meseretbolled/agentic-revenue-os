@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ d.company }}{% endblock %}
+{% block body %}
+<p class="crumb"><a href="/dashboard/">Pipeline</a> / {{ d.company }}</p>
+<div class="head">
+  <h1>{{ d.company }} {% if d.demo %}<span class="chip demo">demo data</span>{% endif %}</h1>
+  <div>
+    <span class="chip stage">{{ d.stage.replace('_', ' ') }}</span>
+    {% if d.tier %}<span class="tier t{{ d.tier }}">Tier {{ d.tier }}</span>{% endif %}
+    {% if d.score is not none %}<strong>{{ d.score }}/100</strong>{% endif %}
+    <span class="muted">· age {{ d.age }} · owner agent: {{ d.owner }} · contact {{ d.contact or '-' }}</span>
+  </div>
+</div>
+
+<div class="grid2">
+<section class="card"><h2>Score</h2>
+  {% if d.rules %}
+  <p class="muted">{{ d.headline }}</p>
+  <table class="t"><thead><tr><th>Rule</th><th class="num">Points</th><th>Why</th></tr></thead><tbody>
+  {% for r in d.rules %}<tr><td>{{ r.group }}</td><td class="num {{ 'pos' if r.points.startswith('+') else 'neg' }}">{{ r.points }}</td><td>{{ r.reason }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="muted">Not scored yet.</p>{% endif %}
+</section>
+
+<section class="card"><h2>Pending actions</h2>
+  {% if d.pending %}
+  <table class="t"><tbody>
+  {% for p in d.pending %}<tr><td>{{ p.type.replace('_', ' ') }}</td><td>{{ p.status.replace('_', ' ') }}</td>
+    <td>{% if p.veto_until and p.status == 'pending' %}<span class="countdown" data-until="{{ p.veto_until.isoformat() }}"></span>{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+  <p><a href="/dashboard/pending">Open Pending</a></p>
+  {% else %}<p class="muted">Nothing waiting.</p>{% endif %}
+</section>
+</div>
+
+<section class="card"><h2>IO terms</h2>
+  {% if d.io %}
+  <p>Terms source: <span class="chip {{ 'auto' if d.io.source == 'auto' else 'override' }}">{{ d.io.source }}</span>
+     Package: <strong>{{ d.io.package }}</strong> · {{ d.io.start }} to {{ d.io.end }} · discount {{ d.io.discount }}%
+     {% if d.io.ok is not none %}· validation: <strong class="{{ 'pos' if d.io.ok else 'neg' }}">{{ 'OK' if d.io.ok else 'FAILED' }}</strong>{% endif %}</p>
+  {% if d.io.lines %}
+  <table class="t"><thead><tr><th>Item</th><th>Unit</th><th class="num">Qty / month</th><th class="num">Unit price</th><th class="num">Monthly</th></tr></thead><tbody>
+  {% for l in d.io.lines %}<tr><td>{{ l.name }}</td><td>{{ l.unit }}</td><td class="num">{{ '{:,g}'.format(l.quantity) }}</td><td class="num">{{ l.unit_price|money }}</td><td class="num">{{ l.amount|money }}</td></tr>{% endfor %}
+  </tbody></table>
+  <p>Monthly subtotal <strong>{{ d.io.monthly|money }}</strong> × {{ d.io.months }} months = term total <strong>{{ d.io.total|money }}</strong></p>
+  {% elif d.io['items'] %}<p class="muted">Items (per month): {% for i in d.io['items'] %}{{ i.id }} × {{ i.quantity }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
+  {% for p in d.io.problems %}<p class="neg">{{ p }}</p>{% endfor %}
+  {% else %}<p class="muted">No IO yet.</p>{% endif %}
+</section>
+
+<section class="card"><h2>Call extraction</h2>
+  {% if d.calls %}
+  <table class="t"><thead><tr><th>Field</th><th>Value</th><th>Verbatim quote</th><th>Exact quote</th></tr></thead><tbody>
+  {% for c in d.calls %}<tr><td>{{ c.name }}</td><td>{{ c.value|mask }}</td><td class="quote">{{ c.quote|mask }}</td>
+    <td>{% if c.exact %}<span class="chip auto">found in transcript</span>{% elif c.quote %}<span class="chip warn">not re-checked</span>{% else %}-{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="muted">No call processed yet.</p>{% endif %}
+</section>
+
+<section class="card"><h2>Emails</h2>
+  {% for m in d.emails %}
+    <details class="mail {{ m.direction }}"><summary>
+      <span class="chip {{ 'out' if m.direction == 'outbound' else 'in' }}">{{ 'sent' if m.direction == 'outbound' else 'received' }}</span>
+      {{ m.subject|mask }} <span class="muted">· {{ m.created_at|when }}</span>
+      {% if m.classification %}<span class="chip">{{ m.classification }}</span>{% endif %}
+      {% if m.quarantined %}<span class="chip warn">quarantined</span>{% endif %}</summary>
+      <pre>{{ (m.body or '')[:1500]|mask }}</pre></details>
+  {% else %}<p class="muted">No emails.</p>{% endfor %}
+</section>
+
+<section class="card"><h2>Lessons cited</h2>
+  {% for l in d.lessons %}<p><strong>L{{ l.id }}</strong> {{ l.text|mask }} <span class="muted">· shaped {{ (l.used_in or 'an action').replace('_',' ') }} · outcome {{ l.outcome }}</span></p>
+  {% else %}<p class="muted">No lesson shaped this deal's drafts.</p>{% endfor %}
+</section>
+
+<section class="card"><h2>Timeline</h2>
+  <p class="muted">Who, what, why: every event the system recorded for this deal.</p>
+  <table class="t timeline"><tbody>
+  {% for e in d.timeline %}<tr><td class="time">{{ e.at|when }}</td><td><span class="chip k-{{ e.kind }}">{{ e.kind }}</span></td><td>{{ e.what|mask }}</td><td class="muted">{{ e.why|mask }}</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

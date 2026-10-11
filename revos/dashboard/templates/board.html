@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Pipeline{% endblock %}
+{% block body %}
+<h1>Pipeline</h1>
+<div class="board">
+{% for stage in stages %}
+  <section class="col{{ ' is-empty' if not columns[stage] }}">
+    <h2>{{ stage.replace('_', ' ') }} <span class="count">{{ columns[stage]|length }}</span></h2>
+    {% for c in columns[stage] %}
+      <a class="deal" href="/dashboard/deals/{{ c.id }}">
+        <div class="deal-top"><strong>{{ c.company }}</strong>{% if c.demo %}<span class="chip demo">demo</span>{% endif %}</div>
+        <div class="deal-meta">
+          {% if c.tier %}<span class="tier t{{ c.tier }}">{{ c.tier }}</span>{% endif %}
+          {% if c.score is not none %}<span>{{ c.score }}/100</span>{% endif %}
+          <span class="muted">· {{ c.age }}</span>
+        </div>
+        <div class="muted small">Owner: {{ c.owner }}</div>
+        <div class="next">{{ c.next }}</div>
+      </a>
+    {% else %}<div class="empty">none</div>{% endfor %}
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

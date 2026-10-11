@@ -447,3 +447,20 @@ the terms from the call fields and the pack's SAMPLE rate card, then `validate_i
 - `make live-llm`: one whole lead with the real model against the mock mail, CRM and e-sign adapters (cap
   `LIVE_LEAD_MAX_USD`). Measured about $0.05 a lead.
 - `revos doctor` prints an `LLM spend` line: calls, tokens in/out and dollars against `LLM_MAX_SPEND_USD`.
+
+## The operator dashboard
+
+Open `http://127.0.0.1:8100/dashboard/` (the API binds to 127.0.0.1 only). Pages: Pipeline board, deal page, Activity,
+Pending (veto countdown, approvals, hard blocks), Queue and dead letters, Lessons, Integrations, Controls.
+
+- **Sign-in:** set `DASHBOARD_TOKEN` (any long random string) in your local settings file and restart `revos run`.
+  With no token the dashboard answers 503. The token is compared in constant time, the session is a signed HttpOnly
+  SameSite=Strict cookie, and every POST needs a CSRF token. Five wrong tokens lock a client out for five minutes.
+- **Never public:** every `/dashboard` route is refused (404) for a request that arrives through the public tunnel, by
+  the same allowlist that keeps `/status` off it. Only the Slack and Dropbox Sign webhooks and `/healthz` are public.
+- **Actions** call the system's own code: veto, human approval, dead-letter retry and the settings setters, so the same
+  locks and audit rows apply (actor `dashboard`). The dashboard never writes a deal stage and sends nothing itself.
+- **Controls** (kill switch, autonomy mode, veto seconds) live in `system_settings`, override the environment, are read
+  by the policy engine on every decision and are audited. The page shows each effective value and where it comes from.
+- `revos dashboard-seed` inserts clearly marked demo deals (rows only; nothing is queued or sent); `--clear` removes them.
+- Screenshots: `docs/screenshots/dashboard-*.png`.

@@ -1,5 +1,7 @@
 """System switches that live in the database so flipping them needs no restart or deploy."""
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from uuid import UUID
 
 import psycopg
@@ -12,23 +14,82 @@ from revos.runtime.events import record_event
 
 
 def kill_switch_on(conn: psycopg.Connection) -> bool:
-    row = conn.execute("SELECT value FROM settings WHERE key = 'kill_switch'").fetchone()
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'kill_switch'").fetchone()
     return row is None or row[0] is not False      # missing setting fails closed
 
 
 def autonomy_mode(conn: psycopg.Connection) -> AutonomyMode:
-    row = conn.execute("SELECT value FROM settings WHERE key = 'autonomy_mode'").fetchone()
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'autonomy_mode'").fetchone()
     return AutonomyMode(row[0]) if row else AutonomyMode.APPROVAL   # fails closed
 
 
 def _set(conn: psycopg.Connection, key: str, value: object, actor: str, event: str) -> None:
     with conn.transaction():
         conn.execute(
-            "INSERT INTO settings (key, value) VALUES (%s, %s) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
-            (key, Jsonb(value)),
+            "INSERT INTO system_settings (key, value, updated_by) VALUES (%s, %s, %s) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), "
+            "updated_by = EXCLUDED.updated_by",
+            (key, Jsonb(value), actor),
         )
         write_audit(conn, actor, event, None, {"value": value})
+
+
+VETO_MIN_SECONDS, VETO_MAX_SECONDS = 5, 3600
+
+
+def veto_window_override(conn: psycopg.Connection) -> int | None:
+    """The veto window set at runtime, or None when nobody set one (the environment and the pack decide).
+    A stored value that is not a sane number is ignored, never trusted."""
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'veto_window_seconds'").fetchone()
+    value = row[0] if row else None
+    sane = isinstance(value, int) and not isinstance(value, bool)
+    if sane and VETO_MIN_SECONDS <= value <= VETO_MAX_SECONDS:
+        return value
+    return None
+
+
+def set_veto_window(conn: psycopg.Connection, seconds: int | None, actor: str) -> None:
+    """Set the veto window for new actions, or clear the override (None) so the environment decides."""
+    if seconds is None:
+        with conn.transaction():
+            conn.execute("DELETE FROM system_settings WHERE key = 'veto_window_seconds'")
+            write_audit(conn, actor, "system.veto_window_seconds", None, {"value": None, "cleared": True})
+        return
+    if isinstance(seconds, bool) or not VETO_MIN_SECONDS <= seconds <= VETO_MAX_SECONDS:
+        raise ValueError(f"the veto window must be {VETO_MIN_SECONDS} to {VETO_MAX_SECONDS} seconds")
+    _set(conn, "veto_window_seconds", int(seconds), actor, "system.veto_window_seconds")
+
+
+@dataclass(frozen=True)
+class Effective:
+    value: object
+    source: str            # "database" (set at runtime), "environment" or "default"
+    updated_by: str | None = None
+    updated_at: object = None
+
+
+def effective_controls(conn: psycopg.Connection, env: Mapping[str, str], pack_veto_seconds: int
+                       ) -> dict[str, Effective]:
+    """What the policy engine will use right now for each control, and where that value comes from."""
+    rows = {r[0]: r for r in conn.execute(
+        "SELECT key, value, updated_by, updated_at FROM system_settings").fetchall()}
+    out: dict[str, Effective] = {}
+    kill = rows.get("kill_switch")
+    out["kill_switch"] = Effective(kill_switch_on(conn), "database" if kill else "default (on: fails closed)",
+                                   kill[2] if kill else None, kill[3] if kill else None)
+    mode = rows.get("autonomy_mode")
+    out["autonomy_mode"] = Effective(autonomy_mode(conn).value, "database" if mode else "default (approval)",
+                                     mode[2] if mode else None, mode[3] if mode else None)
+    override = veto_window_override(conn)
+    veto = rows.get("veto_window_seconds")
+    raw_env = env.get("VETO_WINDOW_SECONDS", "").strip()
+    if override is not None:
+        out["veto_window_seconds"] = Effective(override, "database", veto[2], veto[3])
+    elif raw_env.isdigit():
+        out["veto_window_seconds"] = Effective(int(raw_env), "environment (VETO_WINDOW_SECONDS)")
+    else:
+        out["veto_window_seconds"] = Effective(pack_veto_seconds, "default (pack / built-in)")
+    return out
 
 
 def set_kill_switch(conn: psycopg.Connection, on: bool, actor: str) -> None:
@@ -40,7 +101,7 @@ def set_autonomy_mode(conn: psycopg.Connection, mode: AutonomyMode, actor: str) 
 
 
 def _epoch(conn: psycopg.Connection) -> int:
-    row = conn.execute("SELECT value FROM settings WHERE key = 'kill_switch_epoch'").fetchone()
+    row = conn.execute("SELECT value FROM system_settings WHERE key = 'kill_switch_epoch'").fetchone()
     return int(row[0]) if row else 0
 
 
@@ -72,7 +133,7 @@ def resume_after_kill_switch(conn: psycopg.Connection, clock: Clock, actor: str)
     """Turn the kill switch off and put every held send back on the queue, atomically."""
     with conn.transaction():
         set_kill_switch(conn, False, actor)
-        conn.execute("UPDATE settings SET value = to_jsonb(%s::int), updated_at = now() "
+        conn.execute("UPDATE system_settings SET value = to_jsonb(%s::int), updated_at = now() "
                      "WHERE key = 'kill_switch_epoch'", (_epoch(conn) + 1,))
         return release_held_sends(conn, clock)
 

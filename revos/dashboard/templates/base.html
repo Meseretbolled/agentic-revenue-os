@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="server-now" content="{{ now.isoformat() if now else '' }}">
+<title>{% block title %}Revenue OS{% endblock %} · Revenue OS</title>
+<link rel="stylesheet" href="/dashboard/static/dashboard.css">
+</head>
+<body data-refresh="{% block refresh %}5{% endblock %}">
+<header class="top">
+  <div class="brand"><span class="dot"></span>Revenue OS</div>
+  <nav>
+    {% set items = [("board","/dashboard/","Pipeline"),("pending","/dashboard/pending","Pending"),
+                    ("activity","/dashboard/activity","Activity"),("queue","/dashboard/queue","Queue"),
+                    ("lessons","/dashboard/lessons","Lessons"),("integrations","/dashboard/integrations","Integrations"),
+                    ("controls","/dashboard/controls","Controls")] %}
+    {% for key, href, label in items %}
+      <a href="{{ href }}" class="{{ 'on' if active == key else '' }}">{{ label }}
+        {% if key == 'pending' and waiting %}<span class="badge">{{ waiting }}</span>{% endif %}</a>
+    {% endfor %}
+  </nav>
+  <form method="post" action="/dashboard/logout" class="logout">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">Sign out</button>
+  </form>
+</header>
+{% if kill %}<div class="banner danger">KILL SWITCH ON: nothing is being sent. <a href="/dashboard/controls">Controls</a></div>{% endif %}
+<main id="content">
+  {% if msg %}<div class="flash {{ 'ok' if msg_ok else 'err' }}">{{ msg }}</div>{% endif %}
+  {% block body %}{% endblock %}
+</main>
+<footer>Everything here comes from the live database. Email addresses are masked. <span id="refreshed"></span></footer>
+<script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>

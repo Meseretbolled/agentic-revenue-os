@@ -79,7 +79,7 @@ def test_bypass_never_relaxes_suppression(conn, ro_conn, pack, clock):
 def test_bypass_never_relaxes_the_kill_switch(conn, ro_conn, pack, clock):
     rig, f = first(conn, ro_conn, pack, clock, domain_cap_bypass=True)
     fill_domain(conn, clock, cap(pack))
-    conn.execute("UPDATE settings SET value = 'true' WHERE key = 'kill_switch'")
+    conn.execute("UPDATE system_settings SET value = 'true' WHERE key = 'kill_switch'")
     assert rig.orch.send_action(f.action_id).status == "wait"
     assert audit(conn, "domain_cap.bypassed") == []
 
@@ -197,6 +197,6 @@ def test_retry_held_is_just_another_attempt_and_every_check_still_applies(conn, 
     assert rig.orch.send_action(f.action_id).status == "deferred"
     retry_held_sends(conn, clock, "operator")
     assert rig.orch.send_action(f.action_id).reason == f"cap:domain:{DOMAIN}"    # held again, not bypassed
-    conn.execute("UPDATE settings SET value = 'true' WHERE key = 'kill_switch'")
+    conn.execute("UPDATE system_settings SET value = 'true' WHERE key = 'kill_switch'")
     assert rig.orch.send_action(f.action_id).status == "wait"
     assert retry_held_sends(conn, clock, "operator") == []                       # a kill-switch hold is not its job

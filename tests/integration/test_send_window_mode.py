@@ -64,7 +64,7 @@ def test_bypass_does_not_relax_suppression(conn, ro_conn, pack, sunday):
 
 def test_bypass_does_not_relax_the_kill_switch(conn, ro_conn, pack, sunday):
     rig, first = first_touch(conn, ro_conn, pack, sunday, send_window_bypass=True)
-    conn.execute("UPDATE settings SET value = 'true' WHERE key = 'kill_switch'")
+    conn.execute("UPDATE system_settings SET value = 'true' WHERE key = 'kill_switch'")
     assert rig.orch.send_action(first.action_id).status == "wait"
     assert audit(conn, "send_window.bypassed") == []
 

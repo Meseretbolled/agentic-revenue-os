@@ -32,7 +32,8 @@ def _via_tunnel(request: Request) -> bool:
 
 def create_app(interactions: SlackInteractions | None = None,
                signing_secret: Callable[[], str] | str = "",
-               signatures: SignatureWebhook | None = None) -> FastAPI:
+               signatures: SignatureWebhook | None = None,
+               dashboard: Any = None) -> FastAPI:
     app = FastAPI(title="Agentic Revenue OS", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.interactions = interactions
     app.state.signatures = signatures
@@ -106,7 +107,24 @@ def create_app(interactions: SlackInteractions | None = None,
             return Response(status_code=401)
         return Response(content=HELLO, status_code=200, media_type="text/plain")
 
+    if dashboard is not None:
+        # every /dashboard route is refused for a request that arrives through the public tunnel, by the
+        # allowlist middleware above: the dashboard is not in PUBLIC_ROUTES and never will be
+        from revos.dashboard.router import build_router
+        app.include_router(build_router(dashboard))
+
     return app
+
+
+def build_dashboard() -> Any:
+    """The dashboard's settings from the environment. With no DASHBOARD_TOKEN it answers 503 everywhere."""
+    from revos.adapters.clock import SystemClock
+    from revos.dashboard.auth import Auth
+    from revos.dashboard.router import DashboardConfig, HealthProbe
+    from revos.db import connect
+    from revos.doctor import run_checks
+    return DashboardConfig(Auth(os.environ.get("DASHBOARD_TOKEN", "").strip()), connect, SystemClock(),
+                           dict(os.environ), HealthProbe(run_checks))
 
 
 def build_default_app() -> FastAPI:
@@ -118,7 +136,8 @@ def build_default_app() -> FastAPI:
     slack, _ = build_slack()
     interactions = SlackInteractions(connect, SystemClock(), slack, allowed)
     signatures = SignatureWebhook(build_esign(), connect, SystemClock())
-    return create_app(interactions, lambda: os.environ.get("SLACK_SIGNING_SECRET", ""), signatures)
+    return create_app(interactions, lambda: os.environ.get("SLACK_SIGNING_SECRET", ""), signatures,
+                      build_dashboard())
 
 
 class _LazyApp:

@@ -133,7 +133,8 @@ def list_dead_letters(conn: psycopg.Connection) -> list[dict[str, Any]]:
     ).fetchall()
 
 
-def retry_dead_letter(conn: psycopg.Connection, dead_letter_id: int, clock: Clock) -> int:
+def retry_dead_letter(conn: psycopg.Connection, dead_letter_id: int, clock: Clock,
+                      actor: str = "operator") -> int:
     """Put a dead-lettered job back on the queue with a fresh attempt budget."""
     with conn.transaction():
         cur = conn.cursor(row_factory=dict_row)
@@ -152,7 +153,7 @@ def retry_dead_letter(conn: psycopg.Connection, dead_letter_id: int, clock: Cloc
         )
         cur.execute("UPDATE dead_letters SET retried_at = %s WHERE id = %s", (now, dead_letter_id))
         cur.execute(
-            "INSERT INTO audit_log (actor, event, detail) VALUES ('operator', 'job.retried', %s)",
-            (Jsonb({"dead_letter_id": dead_letter_id, "job_id": dl["job_id"]}),),
+            "INSERT INTO audit_log (actor, event, detail) VALUES (%s, 'job.retried', %s)",
+            (actor, Jsonb({"dead_letter_id": dead_letter_id, "job_id": dl["job_id"]}),),
         )
         return dl["job_id"]

@@ -50,7 +50,7 @@ from revos.policy.engine import ActionRequest
 from revos.policy.gate import GateResult, run_approved_action
 from revos.policy.recipients import base_of, recipient_allowed
 from revos.policy.service import propose_action, release_veto_expired
-from revos.policy.settings import release_held_sends
+from revos.policy.settings import release_held_sends, veto_window_override
 from revos.ports.calendar import Calendar, Slot
 from revos.ports.clock import Clock
 from revos.ports.esign import ESign
@@ -217,6 +217,9 @@ class Orchestrator:
                                         domain_cap_bypass=self.domain_cap_bypass)
         if self.veto_window_seconds is not None:       # VETO_WINDOW_SECONDS, set deliberately
             config = replace(config, veto_window_seconds=self.veto_window_seconds)
+        runtime = veto_window_override(self.conn)       # set at runtime: wins over the environment
+        if runtime is not None:
+            config = replace(config, veto_window_seconds=runtime)
         if self.daily_cap is not None:                 # a real mailbox gets a lower cap than the pack's
             config = replace(config, daily_cap=min(config.daily_cap, self.daily_cap))
         return config

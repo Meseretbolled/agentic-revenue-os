@@ -57,7 +57,7 @@ def test_a_tool_context_holds_no_way_to_send_or_write() -> None:
 
 
 def test_the_connection_tools_get_cannot_write(ro_conn) -> None:
-    for sql in ("INSERT INTO settings (key, value) VALUES ('x', '1')",
+    for sql in ("INSERT INTO system_settings (key, value) VALUES ('x', '1')",
                 "UPDATE deals SET stage = 'handoff'", "DELETE FROM actions"):
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
             ro_conn.execute(sql)

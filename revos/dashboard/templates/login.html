@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Sign in · Revenue OS</title>
+<link rel="stylesheet" href="/dashboard/static/dashboard.css"></head>
+<body class="login">
+<form method="post" action="/dashboard/login" class="card login-card">
+  <div class="brand"><span class="dot"></span>Revenue OS</div>
+  <h1>Operator dashboard</h1>
+  {% if error %}<div class="flash err">That token is not right.</div>{% endif %}
+  <label for="token">Dashboard token</label>
+  <input id="token" name="token" type="password" autocomplete="current-password" autofocus required>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="primary">Sign in</button>
+  <p class="muted">The token is the value of <code>DASHBOARD_TOKEN</code> in your local settings file.</p>
+</form>
+</body></html>
