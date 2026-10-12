@@ -287,8 +287,8 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
 * **Real by default**: keys in `.env` select the real adapter, missing keys select the mock. With a
   key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
   fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
-* **Mock unless switched on**: Tavily. An adapter exists (see "Real web research" below) but `ENRICHMENT_MODE` defaults to `mock`, so research runs on the offline mock. While the mode is `mock`, for this service, `revos doctor` and the banner say `key OK, adapter not built yet:
-  runs as MOCK` (or `key NOT working (...)`) instead of `REAL OK`.
+* **Mock unless switched on**: Tavily. An adapter exists (see "Real web research" below) but `ENRICHMENT_MODE` defaults to `mock`, so research runs on the offline mock. While the mode is `mock`, for this service, `revos doctor` and the banner say `adapter available, runs as MOCK by default; REAL only when
+  ENRICHMENT_MODE=tavily (key OK)` (or `key NOT working (...)`) instead of `REAL OK`.
 * **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
   distinct HubSpot contact (HubSpot merges by email and refuses `.test` and `.example`), and every
   email lands in the one inbox. The demo-mode recipient rule accepts an address only if its domain

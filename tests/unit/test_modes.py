@@ -39,7 +39,7 @@ def test_each_key_switches_its_own_service_to_real() -> None:
 
 def test_a_key_for_a_service_without_an_adapter_yet_is_honestly_a_mock() -> None:
     (slack,) = [m for m in integration_modes({"TAVILY_API_KEY": "x"}) if m.service == "Tavily"]
-    assert slack.mode == MOCK and "key found" in slack.why and "adapter not built yet" in slack.why and not slack.built
+    assert slack.mode == MOCK and "key found" in slack.why and "adapter available" in slack.why and "not built" not in slack.why and not slack.built
 
 
 def test_the_composition_root_agrees_with_the_modes(monkeypatch) -> None:
@@ -130,11 +130,11 @@ def test_a_working_key_for_a_service_without_an_adapter_says_so_plainly(monkeypa
     monkeypatch.setenv("TAVILY_API_KEY", "x")
     monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Tavily", OK)])
     out = CliRunner().invoke(app, ["doctor"]).output
-    assert "Tavily        key OK, adapter not built yet: runs as MOCK" in out
+    assert "Tavily        adapter available, runs as MOCK by default; REAL only when ENRICHMENT_MODE=tavily (key OK)" in out
     assert "REAL OK" not in out and "will run as: MOCK" not in out
     monkeypatch.setattr(doctor, "run_checks", lambda: [Check("Tavily", FAILED, "key rejected")])
     out = CliRunner().invoke(app, ["doctor"]).output
-    assert "Tavily        key NOT working (key rejected), adapter not built yet: runs as MOCK" in out
+    assert "Tavily        key NOT working (key rejected), adapter available, runs as MOCK by default; REAL only when ENRICHMENT_MODE=tavily" in out
 
 
 def test_the_banner_uses_the_same_wording(monkeypatch, tmp_path, test_db_url) -> None:
@@ -158,4 +158,4 @@ def test_the_banner_uses_the_same_wording(monkeypatch, tmp_path, test_db_url) ->
     import revos.runtime.supervisor as sup
     monkeypatch.setattr(sup, "Supervisor", Stub)
     out = CliRunner().invoke(app, ["run", "--no-api"]).output
-    assert "Tavily        key OK, adapter not built yet: runs as MOCK" in out
+    assert "Tavily        adapter available, runs as MOCK by default; REAL only when ENRICHMENT_MODE=tavily (key OK)" in out

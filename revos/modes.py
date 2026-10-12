@@ -28,10 +28,11 @@ class Mode:
         text, e.g. 'REAL OK', and detail), if one was run."""
         if not self.built and status is not None:
             if status == "REAL OK":
-                return f"{self.service:<14}key OK, adapter not built yet: runs as MOCK"
+                return (f"{self.service:<14}adapter available, runs as MOCK by default; "
+                        "REAL only when ENRICHMENT_MODE=tavily (key OK)")
             if status.startswith("REAL FAILED"):
-                return (f"{self.service:<14}key NOT working ({detail or 'failed'}), adapter not built yet: "
-                        "runs as MOCK")
+                return (f"{self.service:<14}key NOT working ({detail or 'failed'}), adapter available, "
+                        "runs as MOCK by default; REAL only when ENRICHMENT_MODE=tavily")
         return self.line()
 
 
@@ -67,9 +68,9 @@ def llm_live(env: Mapping[str, str] | None = None) -> bool:
 def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
     env = os.environ if env is None else env
 
-    def not_built(name: str, key: str, step: str) -> Mode:
-        return Mode(name, MOCK, f"key found, adapter not built yet (arrives in {step})" if _has(env, key)
-                    else "no key", built=False)
+    def not_built(name: str, key: str) -> Mode:
+        why = "key found, adapter available; runs as MOCK unless ENRICHMENT_MODE=tavily"
+        return Mode(name, MOCK, why if _has(env, key) else "no key", built=False)
 
     llm_why = ("" if llm_live(env) else "LLM_MODE is fake" if env.get("LLM_MODE", "fake") != "live"
                else "LLM_MODE=live but ANTHROPIC_API_KEY is missing: the app refuses to start")
@@ -94,7 +95,7 @@ def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
         Mode("Dropbox Sign", REAL if dropbox_sign_configured(env) else MOCK,
              "TEST MODE only" if dropbox_sign_configured(env) else "no key"),
         tavily_mode(env) if (env.get("ENRICHMENT_MODE") or "mock").strip().lower() == "tavily"
-        else not_built("Tavily", "TAVILY_API_KEY", "a later step"),
+        else not_built("Tavily", "TAVILY_API_KEY"),
         Mode("Tunnel URL", REAL if _has(env, "PUBLIC_BASE_URL") else MOCK, "" if _has(env, "PUBLIC_BASE_URL")
              else "PUBLIC_BASE_URL is not set: Slack buttons will not work"),
     ]
