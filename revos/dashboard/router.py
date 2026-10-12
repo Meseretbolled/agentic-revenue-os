@@ -14,16 +14,17 @@ from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from revos.adapters.spend import SpendLedger
-from revos.dashboard import actions, data, words
+from revos.dashboard import actions, data, maps_data, maps_walkthrough, words
 from revos.dashboard.auth import COOKIE, PRE_COOKIE, SESSION_SECONDS, Auth
 from revos.modes import integration_modes
 from revos.policy.settings import effective_controls
 from revos.ports.clock import Clock
+from revos.runtime.scheduler import DEFAULT_SCHEDULES, with_overrides
 
 HERE = Path(__file__).parent
 BASE = "/dashboard"
@@ -262,7 +263,8 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
 
     page("/deals/{deal_id}", "deal.html", "board", deal_ctx)
 
-    def integrations_ctx(conn: psycopg.Connection, request: Request) -> dict[str, Any]:
+    def integration_rows() -> tuple[list[dict[str, Any]], bool]:
+        """Each service with its mode and honest state (the integrations page and the system map share it)."""
         live = cfg.health.snapshot() if cfg.health else {}
         rows = []
         for m in integration_modes(cfg.env):
@@ -276,6 +278,10 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
                     **integration_state(m, status, bool(live) or cfg.health is None),
                 }
             )
+        return rows, bool(live)
+
+    def integrations_ctx(conn: psycopg.Connection, request: Request) -> dict[str, Any]:
+        rows, answered = integration_rows()
         cap = float(cfg.env.get("LLM_MAX_SPEND_USD", "3.00") or 3.0)
         try:
             spend = SpendLedger(conn, cap, 0.05).summary()
@@ -285,7 +291,7 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
             "rows": rows,
             "spend": spend,
             "cap": cap,
-            "checking": cfg.health is not None and not live,
+            "checking": cfg.health is not None and not answered,
             "pct": min(100, round(100 * spend["usd"] / cap)) if cap else 0,
             "checked_ago": words.ago(cfg.health.checked_at, datetime.now(UTC))
             if cfg.health and cfg.health.checked_at
@@ -300,6 +306,60 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
         "controls",
         lambda conn, r: {"c": effective_controls(conn, cfg.env, cfg.pack_veto_seconds)},
     )
+
+    # --- live maps: two pages that draw themselves (static/maps.js) from read-only JSON ------------------
+    packs_dir = HERE.parent.parent / "packs"
+    pack_cache: dict[str, Any] = {}
+
+    def packs() -> Mapping[str, Any]:
+        if "all" not in pack_cache:
+            from revos.segments import load_all
+            pack_cache["all"] = load_all(packs_dir)
+        return pack_cache["all"]
+
+    def architecture_json(conn: psycopg.Connection, request: Request) -> dict[str, Any]:
+        rows, _ = integration_rows()
+        caps = [{"pack": p.id, "daily": p.policy.daily_cap, "per_domain": p.policy.domain_cap}
+                for p in packs().values()]
+        criteria: dict[str, dict[str, list[str]]] = {}
+        for p in packs().values():
+            for stage, fields in p.stages.exit_criteria.items():
+                criteria.setdefault(stage.value, {})[p.id] = list(fields)
+        return maps_data.architecture(
+            conn, cfg.clock.now(), integrations=rows,
+            controls=effective_controls(conn, cfg.env, cfg.pack_veto_seconds),
+            schedules=with_overrides(DEFAULT_SCHEDULES), caps=caps, criteria=criteria)
+
+    def walkthrough_json(conn: psycopg.Connection, request: Request) -> dict[str, Any]:
+        rows, _ = integration_rows()
+        by_service = {r["service"]: r["state"] for r in rows}
+        labels = {"gmail": by_service.get("Gmail", ""), "hubspot": by_service.get("HubSpot", ""),
+                  "slack": by_service.get("Slack", ""), "fireflies": by_service.get("Fireflies", ""),
+                  "dropbox": "TEST MODE", "calendar": "MOCK"}        # the last two are facts of the code
+        research = "Tavily (live)" if cfg.env.get("ENRICHMENT_MODE", "mock") == "tavily" else "mock (default)"
+        return maps_walkthrough.walkthrough(
+            conn, request.query_params.get("deal"), schedules=with_overrides(DEFAULT_SCHEDULES),
+            pack_count=len(packs()), integrations={k: {"mode_label": v} for k, v in labels.items()},
+            research_mode=research)
+
+    def json_api(path: str, build: Callable[[psycopg.Connection, Request], dict[str, Any]]):
+        @router.get(path)
+        def handler(request: Request) -> Response:
+            if not cfg.auth.enabled:
+                return disabled()
+            if signed_in(request) is None:
+                return JSONResponse({"error": "sign in"}, status_code=401, headers=HEADERS)
+            with reader() as conn:
+                return JSONResponse(build(conn, request), headers=HEADERS)
+
+        return handler
+
+    page("/architecture", "architecture.html", "architecture", lambda conn, r: {})
+    page("/data-model", "datamodel.html", "datamodel", lambda conn, r: {})
+    json_api("/api/architecture", architecture_json)
+    json_api("/api/data-model", lambda conn, request: maps_data.data_model(conn))
+    page("/walkthrough", "walkthrough.html", "walkthrough", lambda conn, r: {})
+    json_api("/api/walkthrough", walkthrough_json)
 
     # --- actions: each needs a signed-in session and a CSRF token, then runs the system's own code ---
     Handle = Callable[[psycopg.Connection, dict[str, str], dict[str, str]], actions.Result]
@@ -359,7 +419,8 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
     # --- static files (our own CSS and JS only) -------------------------------------------------------------
     @router.get("/static/{name}")
     def static(name: str) -> Response:
-        kinds = {"dashboard.css": "text/css", "dashboard.js": "text/javascript"}
+        kinds = {"dashboard.css": "text/css", "dashboard.js": "text/javascript", "maps.js": "text/javascript",
+                 "walkthrough.js": "text/javascript"}
         if name not in kinds:
             return PlainTextResponse("Not found", status_code=404)
         return Response(
