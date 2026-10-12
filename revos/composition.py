@@ -1,6 +1,8 @@
 """Composition root: the only place that picks concrete adapters."""
 
 import os
+from collections.abc import Mapping
+from pathlib import Path
 
 import psycopg
 
@@ -156,6 +158,42 @@ def build_mail(conn: psycopg.Connection):
     return mailer, inbox
 
 
+ENRICHMENT_MODES = ("mock", "tavily")
+TAVILY_CACHE_DIR = Path(__file__).resolve().parent.parent / "var" / "cache" / "tavily"
+TAVILY_BUNDLED_CACHE = Path(__file__).resolve().parent / "fixtures" / "tavily_recorded_live_2026-10-12"
+
+
+def enrichment_mode(env: Mapping[str, str] | None = None) -> str:
+    """ENRICHMENT_MODE=mock|tavily. The default is mock; anything else is an error, not a silent mock."""
+    env = os.environ if env is None else env
+    mode = (env.get("ENRICHMENT_MODE") or "mock").strip().lower()
+    if mode not in ENRICHMENT_MODES:
+        raise ValueError(f"ENRICHMENT_MODE must be one of {', '.join(ENRICHMENT_MODES)}, not {mode!r}")
+    return mode
+
+
+def build_research(mock_research, env: Mapping[str, str] | None = None):
+    """(research adapter, mode). The offline mock unless ENRICHMENT_MODE=tavily, which needs a Tavily key or,
+    for a demo with no network, ENRICHMENT_CACHE=replay (answers from the recorded cache only)."""
+    from revos.adapters.tavily.cache import ResearchCache
+    from revos.adapters.tavily.client import TavilyClient
+    from revos.adapters.tavily.research import TavilyResearch
+
+    env = os.environ if env is None else env
+    mode = enrichment_mode(env)
+    if mode == "mock":
+        return mock_research, mode
+    replay = (env.get("ENRICHMENT_CACHE") or "live").strip().lower() == "replay"
+    key = (env.get("TAVILY_API_KEY") or "").strip()
+    if not replay and not key:
+        raise ValueError("ENRICHMENT_MODE=tavily needs TAVILY_API_KEY (or ENRICHMENT_CACHE=replay); "
+                         "refusing to fall back to the mock without saying so")
+    cache = ResearchCache(TAVILY_CACHE_DIR, TAVILY_BUNDLED_CACHE)
+    client = None if replay else TavilyClient(key)
+    cap = int(env.get("TAVILY_MAX_CREDITS", "20"))
+    return TavilyResearch(client, cache, mock_research, max_credits=cap, replay=replay), mode
+
+
 def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, clock=None):
     """The composition root for the running system: concrete adapters where credentials exist,
     mocks everywhere else. The same Orchestrator either way."""
@@ -170,6 +208,7 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
     from revos.slack.notifier import SlackNotifier
 
     world = build_mock_world()
+    research, research_mode = build_research(world.research)
     mailer, inbox = build_mail(conn)
     crm = build_crm()
     policy = PolicyConfig.from_env()
@@ -186,7 +225,7 @@ def build_orchestrator(conn: psycopg.Connection, ro_conn: psycopg.Connection, cl
     clock = clock or SystemClock()
     return Orchestrator(
         conn, ro_conn, clock=clock, packs=packs, runner=build_runner(conn),
-        research=world.research, provider=router, identity=build_identity(),
+        research=research, enrichment_mode=research_mode, provider=router, identity=build_identity(),
         demo_mode=policy.demo_mode, allowed_recipients=policy.allowed_recipients,
         plus_bases=policy.plus_bases, send_window_bypass=policy.send_window_bypass,
         domain_cap_bypass=policy.domain_cap_bypass,

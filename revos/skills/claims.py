@@ -133,6 +133,16 @@ def facts_in(*texts: str) -> set[Fact]:
     return {(t.kind, t.key) for text in texts for t in extract_tokens(text)}
 
 
+# A self-promotional superlative ("the top provider", "leading brand") in a web fact is the company's boast.
+# A claim built on one may repeat it only if it says whose words they are.
+_SUPERLATIVE = re.compile(r"\b(top|best|leading|number one|no\.? ?1|largest|biggest|premier|foremost|"
+                          r"world[- ]class|award[- ]winning|#1)\b", re.IGNORECASE)
+_ATTRIBUTION = re.compile(r"\b(describes|calls|bills|presents|promotes|markets) (itself|themselves|himself|"
+                          r"herself)|\bself[- ]described\b|\bclaims? (?:to be|that|it)\b|"
+                          r"\bsays (?:it|they|that)\b|\baccording to (?:its|their|the company's)\b|"
+                          r"\bin (?:its|their) own words\b", re.IGNORECASE)
+
+
 class ClaimVerifier(Protocol):
     def verify_claims(self, draft: Draft, evidence: Evidence) -> Sequence[ClaimVerdict]: ...
 
@@ -186,6 +196,11 @@ def deterministic_check(
                                 + ", ".join(unknown), claim.text))
         cited = [evidence.items[e] for e in claim.evidence if e in evidence.items]
         claim_support[i] = facts_in(*(c.text for c in cited))
+        if (any(c.web for c in cited) and _SUPERLATIVE.search(claim.text)
+                and not _ATTRIBUTION.search(claim.text)):
+            issues.append(Issue("unattributed_superlative", "the claim repeats a self-promotional "
+                                "superlative from the company's website as fact: say the company describes "
+                                f"itself that way, or leave it out: '{claim.text[:90]}'", claim.text))
         if cited and _RECENCY.search(claim.text) and all(c.stale for c in cited):
             issues.append(Issue("stale_as_recent", "claim calls an old signal recent: "
                                 f"'{claim.text[:90]}'", claim.text))

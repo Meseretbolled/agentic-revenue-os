@@ -24,7 +24,7 @@ replaced by the segment's own approved wording.
 | Slack (veto window, approvals, digest, drafts) | Real when set; buttons need a public tunnel |
 | Fireflies (call transcripts) | Real adapter, polled (every 300 s by default; `CALLS_POLL_SECONDS` shortens it, minimum 30 s) |
 | Dropbox Sign | **Test mode only**; nothing is legally binding |
-| Tavily (web research) | **Not built.** The key works, but there is no Tavily adapter: all research runs on the offline mock |
+| Tavily (web research) | **Adapter built, off by default.** Research runs on the offline mock unless `ENRICHMENT_MODE=tavily`. Run live on two real companies (2026-10-12); recordings replay offline. Everything else is tested with synthetic fixtures |
 | LinkedIn | **Draft-only**. No code can send to LinkedIn: a person copies the text |
 | Case studies | Public testimonials published on cool.co, each with its source link and label |
 | Rate card | A **SAMPLE**, labelled as one. Not COOL's prices |

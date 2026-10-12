@@ -1,0 +1,38 @@
+# Words that say what KIND of company something is, not which one. They never identify a company by themselves, so
+# the entity match ignores them when it checks that a page names the lead's company ("Acme Media Group" is matched
+# on "acme"). Plain data, not code: it is not tied to any customer segment.
+words:
+  - inc
+  - llc
+  - ltd
+  - co
+  - corp
+  - corporation
+  - company
+  - group
+  - holdings
+  - limited
+  - the
+  - and
+  - of
+  - gmbh
+  - media
+  - marketing
+  - agency
+  - agencies
+  - digital
+  - creative
+  - studio
+  - studios
+  - fitness
+  - collective
+  - brands
+  - brand
+  - partners
+  - international
+  - global
+  - solutions
+  - advertising
+  - services
+  - usa
+  - us

@@ -17,6 +17,7 @@ from revos.ports.clock import Clock
 from revos.runtime.events import record_event
 
 PROFILES_FILE = Path(__file__).resolve().parent / "fixtures" / "seed_profiles.yaml"
+REAL_PROFILES_FILE = Path(__file__).resolve().parent / "fixtures" / "real_seed_profiles.yaml"
 PROFILE_NAMES = ("hot", "warm", "cold")
 FALLBACK_BASE = "prospect@example.com"          # used only when PROSPECT_TEST_EMAIL is not set (mock runs)
 
@@ -41,6 +42,22 @@ def load_profiles(segment_id: str, path: Path = PROFILES_FILE) -> dict[str, dict
     return profiles
 
 
+def real_profile(name: str, path: Path = REAL_PROFILES_FILE) -> tuple[str, dict[str, Any]]:
+    """(segment id, profile) for a REAL company that is researched on the web (ENRICHMENT_MODE=tavily).
+    The company is real; the contact is not: every profile's contact is the owner's own allowlisted inbox
+    (a plus-address), never anyone at the company, and nothing is ever sent to the company's domain."""
+    data = yaml.safe_load(path.read_text()) or {}
+    for segment_id, profiles in data.items():
+        if name in profiles:
+            profile = profiles[name]
+            missing = {"company", "domain", "contact", "fields", "email_tag"} - set(profile)
+            if missing:
+                raise ValueError(f"real profile {name!r} lacks {', '.join(sorted(missing))}")
+            return segment_id, profile
+    raise ValueError(f"no real profile {name!r} in {path.name}; have: "
+                     + ", ".join(sorted(n for v in data.values() for n in v)))
+
+
 def demo_address(tag: str, env: Mapping[str, str] | None = None) -> str:
     """The plus-address for a demo lead, e.g. demo_address('acme') -> name+acme@gmail.com."""
     env = os.environ if env is None else env
@@ -58,6 +75,9 @@ def seed_lead(conn: psycopg.Connection, clock: Clock, *, segment_id: str, pack_v
     """Create the company, contact and deal and queue lead.created. Safe to repeat: the same email
     returns the same deal and queues nothing new. Returns (deal id, created)."""
     email = email.strip().lower()
+    if email.endswith("@" + domain.lower().removeprefix("www.")) or email.endswith("." + domain.lower()):
+        raise ValueError(f"refusing to seed a contact at the company's own domain ({domain}): demo mail "
+                         "goes only to the owner's allowlisted inbox")
     with conn.transaction():
         existing = conn.execute(
             "SELECT d.id FROM deals d JOIN contacts c ON c.id = d.contact_id WHERE lower(c.email) = %s "

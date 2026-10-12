@@ -18,7 +18,7 @@ One row per box in the diagrams of `docs/DESIGN.md`: the code that implements it
 | Claude Agent SDK (Sonnet, Haiku) | revos/adapters/claude_llm.py, revos/agents/runner.py (`SdkRunner`), revos/composition.py (`build_runner`) | tests/integration/test_sdk_runner.py::test_the_sdk_gets_no_builtin_tools_no_host_settings_and_only_the_agents_own_tools; tests/integration/test_claude_llm.py::test_spend_cap_blocks_the_call_that_would_pass_it |
 | Segment packs (2 packs, YAML) | packs/franchise_brands, packs/agencies, revos/segments/schema.py | tests/unit/test_packs.py::test_real_pack_loads_with_everything_in_it; tests/unit/test_no_segment_names.py::test_no_python_file_names_a_segment |
 | Lessons store (tag + keyword) | revos/mcp/tools_lessons.py, revos/runtime/lessons.py, migrations/0001_init.sql, 0006_lessons_loop.sql | tests/integration/test_mcp_scope.py::test_lessons_rank_by_tag_then_keywords; tests/integration/test_lessons_loop.py::test_lessons_come_from_the_call_with_their_evidence_source_and_segment |
-| Web research (MOCK, no Tavily) | revos/adapters/mock/research.py; revos/modes.py (`not_built("Tavily", ...)`) | tests/unit/test_modes.py::test_a_key_for_a_service_without_an_adapter_yet_is_honestly_a_mock |
+| Web research (mock default, Tavily opt-in) | revos/adapters/mock/research.py (default); revos/adapters/tavily/research.py (`TavilyResearch`), revos/skills/entity_match.py, revos/skills/web_research.py, revos/composition.py (`build_research`) | tests/unit/test_enrichment_setup.py::test_the_default_is_the_mock_and_the_mock_object_is_returned_unchanged; tests/unit/test_entity_match.py::test_the_known_wrong_company_case_unrelated_real_companies_are_all_rejected; tests/integration/test_web_enrichment.py::test_every_rejected_result_is_audited_with_its_reason; tests/unit/test_superlatives.py::test_an_unattributed_superlative_from_a_web_fact_is_rejected; tests/unit/test_recorded_live_research.py::test_no_wrong_company_result_is_accepted_and_replay_costs_nothing |
 | Postgres (all state, audit log) | migrations/0001_init.sql to 0015_dead_letter_ack.sql, revos/db.py | tests/integration/test_migrations.py::test_migrate_is_idempotent; tests/integration/test_transitions.py::test_audit_log_is_append_only |
 
 ## Fig 1b: how a decision becomes a side effect
@@ -73,6 +73,10 @@ One row per box in the diagrams of `docs/DESIGN.md`: the code that implements it
 Tables in the schema but not drawn: approvals, agent_runs, agent_steps, agent_proposals, held_replies, held_calls, esign_attempts, send_counters, system_settings, slack_messages, slack_interactions. There is no separate outbox, timer, IO-terms or signature-event table (see the Fig 3 caption).
 
 
+## What was verified live and what was not
+
+Tavily was run LIVE once on 2026-10-12 for Orangetheory Fitness and Hawke Media (2 searches, 2 extracts, 2 credits reported); the real answers are recorded in `revos/fixtures/tavily_recorded_live_2026-10-12/` and replayed by `tests/unit/test_recorded_live_research.py`. Everything else in the web-enrichment path (caps, fallback, injection, citation, never-send) is proven offline with synthetic fixtures. Not verified live: Tavily's plan limits, a search that returns an instruction-like page, and a failing key.
+
 ## What the evidence does not cover
 
-The real-service behaviour (HubSpot, Gmail, Slack, Fireflies, Dropbox Sign test mode, live Claude) is recorded in `docs/INTEGRATIONS.md`; the tests here run offline against fakes and mocks and a real Postgres.
+The other real-service behaviour (HubSpot, Gmail, Slack, Fireflies, Dropbox Sign test mode, live Claude) is recorded in `docs/INTEGRATIONS.md`; the tests here run offline against fakes and mocks and a real Postgres.

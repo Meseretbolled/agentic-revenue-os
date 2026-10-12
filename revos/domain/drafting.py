@@ -9,6 +9,7 @@ class EvidenceItem:
     source_url: str | None = None
     stale: bool = False          # too old to be called recent
     demo: bool = False           # a fictional demo-profile fact: never presented as real research
+    web: bool = False            # a fact from real web research: the company's own words, not our claim
 
 
 @dataclass(frozen=True)
