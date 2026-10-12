@@ -21,7 +21,9 @@
         ("Pipeline", [("board","/dashboard/pipeline","Deals","Every deal by stage","pipeline"),
                       ("pending","/dashboard/pending","Pending approvals","Veto windows and decisions","pending")]),
         ("Intelligence", [("lessons","/dashboard/lessons","Lessons","What the system has learned","lessons")]),
-        ("Governance", [("activity","/dashboard/activity","Audit trace","Every recorded event","activity"),
+        ("Governance", [("architecture","/dashboard/architecture","System map","Live architecture","stage"),
+                        ("datamodel","/dashboard/data-model","Data map","Live data model","queue"),
+                        ("activity","/dashboard/activity","Audit trace","Every recorded event","activity"),
                         ("controls","/dashboard/controls","Controls","Kill switch and autonomy","controls")]),
         ("Operations", [("queue","/dashboard/queue","Queue health","Jobs and dead letters","queue"),
                         ("integrations","/dashboard/integrations","Integrations","Real, mock or test mode","integrations")])] %}
@@ -61,5 +63,6 @@
   </div>
 </div>
 <script src="/dashboard/static/dashboard.js"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

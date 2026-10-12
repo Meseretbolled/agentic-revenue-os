@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Data map{% endblock %}
+{% block subtitle %}Every table in the live database, built from the catalogue so it cannot drift from the schema.{% endblock %}
+{% block refresh %}0{% endblock %}
+{% block body %}
+<section class="card map-card" aria-labelledby="map-h">
+  <div class="card-title"><h2 id="map-h">Tables, keys and guards</h2><span class="chip" id="map-stamp">Loading</span></div>
+  <p class="muted small">Cards show the table, its live row count and its key columns. Lines are foreign keys. Click a table to highlight what it points to and what points to it. A brown outline marks a table with a database trigger, named at the bottom of its card; * after a type means NOT NULL.</p>
+  <div class="map-scroll"><div id="map" data-src="/dashboard/api/data-model" data-kind="datamodel" role="img" aria-label="Data map"></div></div>
+  <p class="muted small">Sources: <code>information_schema.columns</code>, <code>pg_constraint</code> (primary keys, foreign keys, CHECK constraints), <code>pg_trigger</code>, and a row count per table.</p>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/dashboard/static/maps.js"></script>{% endblock %}

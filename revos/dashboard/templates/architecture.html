@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}System map{% endblock %}
+{% block subtitle %}The architecture as it is running right now: every number below is read from the live database and the code's own settings.{% endblock %}
+{% block refresh %}0{% endblock %}
+{% block body %}
+<section class="card map-card" aria-labelledby="map-h">
+  <div class="card-title"><h2 id="map-h">How an event becomes a side effect</h2><span class="chip" id="map-stamp">Loading</span></div>
+  <p class="muted small">Left to right: services in and out, the Postgres runtime, the agents (they only propose), then the policy engine and the send gate (they decide). Counts on the arrows are the last hour.</p>
+  <div class="map-scroll"><div id="map" data-src="/dashboard/api/architecture" data-kind="architecture" role="img" aria-label="System map"></div></div>
+  <p class="muted small">Sources: <code>jobs</code>, <code>events</code>, <code>agent_runs</code>, <code>audit_log</code>, <code>actions</code>, <code>send_counters</code>, <code>system_settings</code>, <code>deals</code>; the integration modes are the ones <code>revos doctor</code> uses; the agent list, schedules and stage criteria come from the code and the packs.</p>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/dashboard/static/maps.js"></script>{% endblock %}

@@ -247,3 +247,30 @@ body.login { display: grid; place-items: center; min-height: 100vh; }
 @media (max-width: 720px) { .page-head { flex-direction: column; align-items: flex-start; } .col { max-width: none; } }
 
 .more { padding: 0 var(--s1) var(--s1); margin: 0; }
+
+/* live maps (system map, data map): inline SVG drawn by maps.js; colours come from the variables above */
+.map-card { padding-bottom: var(--s2); }
+.map-scroll { overflow: auto; max-width: 100%; border: 1px solid var(--border); border-radius: var(--r1); background: var(--card-soft); margin: var(--s1) 0; }
+.map-svg { display: block; font-family: var(--font); }
+.map-svg .m-box { fill: var(--card-solid); stroke: var(--border-strong); stroke-width: 1; }
+.map-svg .m-box.tone-ok { stroke: var(--ok-line); } .map-svg .m-box.tone-warn { stroke: var(--chart-strong); } .map-svg .m-box.tone-bad { stroke: var(--bad-line); stroke-width: 2; }
+.map-svg .m-box.agent-judgement { stroke: var(--chart-strong); } .map-svg .m-box.agent-deterministic { stroke: var(--accent); }
+.map-svg .m-box.stage.has { fill: var(--accent-soft); stroke: var(--accent); } .map-svg .m-box.guarded { stroke: var(--warn); stroke-width: 1.5; }
+.map-svg .m-title { font-size: 13px; font-weight: 650; fill: var(--text); }
+.map-svg .m-text { font-size: 12px; fill: var(--text); }
+.map-svg .m-sub { font-size: 11px; fill: var(--muted); }
+.map-svg .m-num { font-size: 12px; font-weight: 650; fill: var(--text); font-variant-numeric: tabular-nums; }
+.map-svg .m-big { font-size: 20px; font-weight: 650; fill: var(--accent); font-variant-numeric: tabular-nums; }
+.map-svg .m-count { font-size: 11px; font-weight: 650; fill: var(--accent); font-variant-numeric: tabular-nums; }
+.map-svg .m-head { font-size: 10.5px; font-weight: 700; letter-spacing: .14em; fill: var(--muted); }
+.map-svg .m-warn { font-size: 12px; font-weight: 700; fill: var(--bad); }
+.map-svg .m-badge { font-size: 11px; font-weight: 650; fill: var(--muted); }
+.map-svg .m-badge.tone-ok { fill: var(--ok); } .map-svg .m-badge.tone-warn { fill: var(--warn); } .map-svg .m-badge.tone-bad { fill: var(--bad); }
+.map-svg .m-badge.agent-tag-judgement { fill: var(--bad); } .map-svg .m-badge.agent-tag-deterministic { fill: var(--accent); }
+.map-svg .m-arrow { stroke: var(--muted); stroke-width: 1.6; } .map-svg .m-arrow-head { fill: var(--muted); }
+.map-svg .m-rule { stroke: var(--border); }
+.map-svg .m-col { font: 11.5px var(--mono); fill: var(--text); } .map-svg .m-col.pk { fill: var(--accent); font-weight: 700; } .map-svg .m-col.fk { fill: var(--bad); }
+.map-svg .m-guard { font-size: 10.5px; fill: var(--warn); font-weight: 600; }
+.map-svg .dm-card { cursor: pointer; } .map-svg .dm-card:focus-visible { outline: 3px solid var(--accent-ring); }
+.map-svg .dm-card.dim { opacity: .3; } .map-svg .dm-card.sel .m-box { stroke: var(--accent); stroke-width: 2.5; }
+.map-svg .dm-link { stroke: var(--border-strong); stroke-width: 1.2; } .map-svg .dm-link.hot { stroke: var(--accent); stroke-width: 2.2; } .map-svg .dm-link.dim { opacity: .12; }
