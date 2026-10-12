@@ -22,9 +22,9 @@ replaced by the segment's own approved wording.
 | HubSpot (deals, contacts, owner, score note, email timeline) | Real when its key is set |
 | Gmail (SMTP send, IMAP replies) | Real when set; mail goes only to the owner's own addresses in demo mode |
 | Slack (veto window, approvals, digest, drafts) | Real when set; buttons need a public tunnel |
-| Fireflies (call transcripts) | Real adapter, polled every 60 s |
+| Fireflies (call transcripts) | Real adapter, polled (every 300 s by default; `CALLS_POLL_SECONDS` shortens it, minimum 30 s) |
 | Dropbox Sign | **Test mode only**; nothing is legally binding |
-| Tavily (web research) | Real adapter; the agency demo run used the offline mock |
+| Tavily (web research) | **Not built.** The key works, but there is no Tavily adapter: all research runs on the offline mock |
 | LinkedIn | **Draft-only**. No code can send to LinkedIn: a person copies the text |
 | Case studies | Public testimonials published on cool.co, each with its source link and label |
 | Rate card | A **SAMPLE**, labelled as one. Not COOL's prices |
@@ -86,7 +86,7 @@ Settings live in a local, git-ignored settings file; never paste its values anyw
 ### Slack buttons and webhooks need a tunnel
 
 ```
-cloudflared tunnel --url http://localhost:8100 --no-autoupdate    # prints https://<name>.trycloudflare.com
+cloudflared tunnel --url http://localhost:8100 --no-autoupdate    # prints https://<your-tunnel>.trycloudflare.com
 ```
 
 Set `PUBLIC_BASE_URL` to that URL and restart `revos run` (a quick tunnel gets a new URL every time). Then paste:

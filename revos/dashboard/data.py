@@ -20,7 +20,7 @@ EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
 def mask_email(address: str) -> str:
-    """`meseretbolled18+3c5940cf@gmail.com` -> `m***@gmail.com`: the domain stays, the person does not."""
+    """`name+3c5940cf@gmail.com` -> `n***@gmail.com`: the domain stays, the person does not."""
     local, _, domain = address.partition("@")
     return f"{local[:1]}***@{domain}" if domain else address
 

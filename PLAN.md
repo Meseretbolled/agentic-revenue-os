@@ -110,6 +110,6 @@ Rules that apply to every step: see `CLAUDE.md`. Offline fake LLM and mock adapt
 1. Dashboard polish → Slack-only approval view.
 2. Vector search for lessons → keyword + tag.
 3. Calendar integration → `.ics` invite.
-4. Tavily → mock research.
+4. Tavily → mock research (no Tavily adapter is built; the key works).
 5. Dropbox Sign live → built-in signing page.
 6. Keep **never**: the policy engine, the outbox/idempotency, the kill switch, the audit log, the lessons loop, the second segment by config.

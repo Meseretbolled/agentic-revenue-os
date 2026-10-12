@@ -71,7 +71,7 @@ Secrets live only in the owner's local `.env` (never in chat, never in git). Var
 | Gmail (prospect) | Done. A second, separate inbox plays the customer. A "never send to Spam" filter was created there. | `PROSPECT_TEST_EMAIL` | The owner replies from it by hand on camera. |
 | Fireflies | Done. Free plan, no card. Auto-join and recap-sharing were restricted so it does not touch real meetings. API key saved. | `FIREFLIES_API_KEY` | Free plan: 3 transcriptions. Record one good mock sales call, keep two for retries. API limits seen: 30 requests/minute, 500/day. Fireflies also exposes an MCP URL, `https://api.fireflies.ai/mcp` (OAuth). |
 | Dropbox Sign | Done. Free account; API key created. | `DROPBOX_SIGN_API_KEY` | Keep `test_mode`. **UNVERIFIED:** free-account API limits and whether test-mode requests work; fallback is a built-in one-click signing page that still triggers close. |
-| Tavily | Key obtained (the site first blocked the owner with a CloudFront 403, then worked). | `TAVILY_API_KEY` | Optional. **UNVERIFIED** that the key works; test with one search. Without it, use mock research or fetch the company's own site. |
+| Tavily | Key obtained (the site first blocked the owner with a CloudFront 403, then worked). | `TAVILY_API_KEY` | Optional. The key works, but **no Tavily adapter is built**: research runs on the offline mock (or fetches the company's own site). |
 | Anthropic API (Console) | **Account created, no credit yet.** Billing is blocked on card details. | `ANTHROPIC_API_KEY` | The only paid item. Credits $5 to $10 were considered enough. Until a key exists, build and test with the offline fake LLM. A `$` spend cap must exist in code. The Claude Agent SDK may instead use the owner's existing Claude login when no key is set (**UNVERIFIED**; a key, if set, takes precedence). |
 | Cloudflare tunnel | `cloudflared` not installed yet (a 18 MB `.deb` download was in progress, slow). | n/a | Needed so Slack, Fireflies and Dropbox Sign can reach the laptop. Install: `sudo dpkg -i cloudflared-linux-amd64.deb`, or Cloudflare's apt repo. |
 
@@ -204,7 +204,7 @@ Per-agent tool scope is a declared allowlist. Every ID a tool receives must belo
 - **Dropbox Sign** (test mode): send the IO for signature; webhook `signature_request_all_signed` → deal Closed Won → Slack handoff. Webhook callback needs the HMAC/event-hash check Dropbox documents. Fallback: a built-in one-click signing page.
 - **Social (LinkedIn etc.):** drafts only, queued for a person. Say this openly: there is no public API for automated messages.
 - **Calendar:** optional Google Calendar; otherwise email an `.ics` invite.
-- **Research:** Tavily if the key works; otherwise mock research or fetch the company's own site.
+- **Research:** the offline mock research (no Tavily adapter is built, although the key works), or fetch the company's own site.
 
 ### 6.12 Tracking
 

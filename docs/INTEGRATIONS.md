@@ -267,7 +267,7 @@ Slack app settings (api.slack.com/apps):
 4. **Interactivity & Shortcuts**: turn on Interactivity and set the **Request URL** to
    `PUBLIC_BASE_URL/slack/interactions`.
 5. `PUBLIC_BASE_URL` is the https URL of a tunnel to port 8100, for example
-   `cloudflared tunnel --url http://localhost:8100` (it prints a `https://....trycloudflare.com` URL; a quick
+   `cloudflared tunnel --url http://localhost:8100` (it prints a `https://<your-tunnel>.trycloudflare.com` URL; a quick
    tunnel's URL changes each time, so update `PUBLIC_BASE_URL` and the Request URL when it does).
    `revos doctor` calls `GET PUBLIC_BASE_URL/healthz` through the tunnel, and says plainly when it is unset:
    "Slack buttons will not work".
@@ -287,7 +287,7 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
 * **Real by default**: keys in `.env` select the real adapter, missing keys select the mock. With a
   key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
   fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
-* **Not built yet, so MOCK even with a key**: Tavily. For these, `revos doctor` and the banner say `key OK, adapter not built yet:
+* **Not built yet, so MOCK even with a key**: Tavily. There is no Tavily adapter: the key works, but research runs on the offline mock. For this service, `revos doctor` and the banner say `key OK, adapter not built yet:
   runs as MOCK` (or `key NOT working (...)`) instead of `REAL OK`.
 * **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
   distinct HubSpot contact (HubSpot merges by email and refuses `.test` and `.example`), and every
@@ -391,7 +391,7 @@ and the trace says they are fictional demo data. They are never presented as rea
 
 `revos doctor` checks each with one harmless read and prints one line: `REAL OK`, `REAL FAILED`
 (with a category such as `auth`, `timeout`, `network`) or `MOCK` (key missing). It never prints a
-value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dropbox Sign were `REAL OK`; Tavily failed (see below).
+value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dropbox Sign were `REAL OK`. Tavily has no adapter: its key works, but research runs on the offline mock (see below).
 
 | Service | What doctor calls | Status |
 |---|---|---|
@@ -401,7 +401,7 @@ value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dr
 | Gmail | IMAP login and logout only | REAL OK (owner's run) |
 | Fireflies | GraphQL `{ user { user_id } }` | REAL OK; the transcript adapter is built (see the Fireflies section) |
 | Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | REAL OK; a test-mode request was created and cancelled live (see its section) |
-| Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | our call matches Tavily's documented shape; the owner's key was answered 403, which doctor now reports as `key rejected` (check or regenerate the key) |
+| Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | **No adapter is built.** The key works (the owner confirmed), but no Tavily code feeds the agents: research runs on the offline mock, and doctor says `adapter not built yet: runs as MOCK` |
 | Tunnel URL | `GET <PUBLIC_BASE_URL>/healthz` | unverified live |
 
 ## Commands
