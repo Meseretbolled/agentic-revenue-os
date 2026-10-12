@@ -47,7 +47,9 @@ def evidence_from_fields(fields: Mapping[str, Any]) -> Evidence:
     ids = sorted((k.split(":", 1)[1] for k in plain if k.startswith("fact:") and citable(k.split(":", 1)[1])),
                  key=lambda i: (i.startswith(DEMO_FACT_PREFIX), len(i), i))    # real research comes first
     return Evidence.of(EvidenceItem(i, plain[f"fact:{i}"], plain.get(f"fact_source:{i}"),
-                                    demo=i.startswith(DEMO_FACT_PREFIX)) for i in ids)
+                                    demo=i.startswith(DEMO_FACT_PREFIX),
+                                    web=i.startswith(WEB_FACT_PREFIX) and not i.startswith(DEMO_FACT_PREFIX))
+                        for i in ids)
 
 
 def match_tags(fields: Mapping[str, Any]) -> list[str]:

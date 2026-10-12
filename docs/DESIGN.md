@@ -108,7 +108,7 @@ flowchart LR
 | Autonomy, veto, kill switch | `autonomous` or `approval` mode (a `system_settings` row read on every decision); tier A first touches wait 60 s and Cancel is a compare-and-set, so cancel at second 59 and send at second 60 cannot both win; the kill switch holds outbound actions and re-queues them once on release (`policy/settings.py`) |
 | Send gate | Re-reads approval, contact and suppression from the database; demo recipient allowlist, recipient-local send window, atomic daily and per-domain caps (`policy/gate.py`) |
 | Untrusted content | Replies, pages and transcripts are wrapped, scanned (hidden HTML too), quarantined, never obeyed (`domain/injection.py`); a web result is kept only if its domain, name and known location match the lead (`skills/entity_match.py`) |
-| Claim checker | Code rejects any undeclared number, name or date, then a model verifier checks each cited fact; no verifier fails closed; a failed line is replaced by the pack's wording (`skills/claims.py`) |
+| Claim checker | Code rejects any undeclared number, name or date, then a model verifier checks each cited fact; no verifier fails closed; a company's own superlative (top, best, leading) must be attributed to it; a failed line is replaced by the pack's wording (`skills/claims.py`) |
 | Audit | `audit_log` is append-only (trigger), written in the same transaction as the change, one correlation id per event |
 
 ## 4. Reliability
