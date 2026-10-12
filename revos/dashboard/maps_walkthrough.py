@@ -27,7 +27,7 @@ NODES: dict[str, tuple[int, int, int, int, str, str]] = {
     "webhooks": (10, 190, 150, 56, "Webhooks", "Slack button presses and Dropbox Sign callbacks. Both are signature-checked; nothing else is reachable from outside."),
     "pollers": (10, 260, 150, 56, "Pollers", "Read Gmail replies and finished Fireflies calls on a timer, once each."),
     "events": (190, 50, 170, 70, "Events + queue", "Every trigger becomes an event with a unique key (a duplicate is a no-op), then jobs claimed with SKIP LOCKED, retried, then dead-lettered."),
-    "orchestrator": (190, 190, 170, 90, "Orchestrator", "Owns the deal. Runs the job handlers, asks agents for proposals, and moves the stage only through transition_deal()."),
+    "orchestrator": (190, 190, 170, 90, "Orchestrator", "Owns the deal. Runs the job handlers, asks agents for proposals, and moves the stage only through the state machine's one guarded function."),
     "packs": (190, 330, 170, 56, "Segment packs", "Each segment is YAML: scoring, wording, policy, rate card, case studies, stage criteria. No Python names a segment."),
     "postgres": (190, 520, 400, 56, "Postgres", "The only state: deals, queue, outbox, audit. The source of truth."),
     "agents": (395, 50, 190, 80, "Agents", "Agents only propose. Some are plain rules, some use a model for judgement; none can send or approve anything."),
