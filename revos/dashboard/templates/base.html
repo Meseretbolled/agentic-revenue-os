@@ -12,18 +12,27 @@
 <a class="skip" href="#content">Skip to content</a>
 <div class="app">
   <aside class="sidebar" aria-label="Main">
-    <div class="brand"><span class="logo"></span><span class="brand-name">Revenue OS</span></div>
+    <div class="brand"><span class="logo"></span><span class="brand-text"><span class="brand-name">Revenue OS</span><span class="brand-sub">Agents that show their work</span></span></div>
+    <div class="live-card"><p class="eyebrow"><i class="dot-live"></i>Live system</p>
+      <p>Agents propose, code decides, and every step is written to an audit trail.</p></div>
     <nav>
-      {% set items = [("overview","/dashboard/","Overview"),("board","/dashboard/pipeline","Pipeline"),
-                      ("pending","/dashboard/pending","Pending"),("activity","/dashboard/activity","Activity"),
-                      ("queue","/dashboard/queue","Queue"),("lessons","/dashboard/lessons","Lessons"),
-                      ("integrations","/dashboard/integrations","Integrations"),
-                      ("controls","/dashboard/controls","Controls")] %}
-      {% for key, href, label in items %}
+      {% set groups = [
+        (None, [("overview","/dashboard/","Overview","The whole system at a glance","overview")]),
+        ("Pipeline", [("board","/dashboard/pipeline","Deals","Every deal by stage","pipeline"),
+                      ("pending","/dashboard/pending","Pending approvals","Veto windows and decisions","pending")]),
+        ("Intelligence", [("lessons","/dashboard/lessons","Lessons","What the system has learned","lessons")]),
+        ("Governance", [("activity","/dashboard/activity","Audit trace","Every recorded event","activity"),
+                        ("controls","/dashboard/controls","Controls","Kill switch and autonomy","controls")]),
+        ("Operations", [("queue","/dashboard/queue","Queue health","Jobs and dead letters","queue"),
+                        ("integrations","/dashboard/integrations","Integrations","Real, mock or test mode","integrations")])] %}
+      {% for group, items in groups %}
+        {% if group %}<div class="nav-group">{{ group }}</div>{% endif %}
+        {% for key, href, label, sub, ico in items %}
         <a href="{{ href }}" class="nav-item{{ ' on' if active == key }}" {% if active == key %}aria-current="page"{% endif %}>
-          {{ icon({"board": "pipeline"}.get(key, key)) }}<span class="nav-label">{{ label }}</span>
+          {{ icon(ico) }}<span class="nav-text"><span class="nav-label">{{ label }}</span><span class="nav-sub">{{ sub }}</span></span>
           {% if key == 'pending' and waiting %}<span class="badge" title="{{ waiting }} waiting">{{ waiting }}</span>{% endif %}
         </a>
+        {% endfor %}
       {% endfor %}
     </nav>
     <div class="side-foot">
@@ -35,7 +44,7 @@
     </div>
   </aside>
   <div class="main">
-    <header class="page-head">
+    {% block pagehead %}<header class="page-head">
       <div>
         <h1>{% block title %}Revenue OS{% endblock %}</h1>
         <p class="sub">{% block subtitle %}{% endblock %}</p>
@@ -43,7 +52,7 @@
       <div class="updated" title="The page refreshes itself every few seconds">
         <span class="pulse" id="pulse"></span><span id="updated-text">Updated just now</span>
       </div>
-    </header>
+    </header>{% endblock %}
     {% if kill %}<div class="banner danger" role="status">Kill switch is ON: nothing is being sent. <a href="/dashboard/controls">Open controls</a></div>{% endif %}
     <main id="content" tabindex="-1">
       {% if msg %}<div class="flash {{ 'ok' if msg_ok else 'err' }}" role="status">{{ msg }}</div>{% endif %}

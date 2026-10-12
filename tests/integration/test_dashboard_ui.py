@@ -41,7 +41,7 @@ def test_the_overview_shows_the_kpis_the_funnel_the_hourly_chart_and_what_needs_
     html = signed.get("/dashboard/").text
     for label in ("Live deals", "Awaiting you", "Sends in veto window", "System vs human", "Model spend"):
         assert label in html
-    assert 'class="funnel"' in html and 'class="hours"' in html and html.count('class="svg-bar') >= 24
+    assert 'class="stage-flow"' in html and 'class="hours"' in html and html.count('class="svg-bar') >= 24
     assert "Needs you" in html and "Nothing needs you." not in html
     assert "Approve follow up" in html and "dead letter" in html          # an approval and an unacknowledged letter
     assert re.search(r'<span class="kpi-value">\d+</span>\s*<span class="kpi-sub">in an open stage', html)
@@ -141,11 +141,11 @@ def dead_ids(conn) -> list[int]:
     return [r[0] for r in conn.execute("SELECT id FROM dead_letters ORDER BY id")]
 
 
-def add_dead(conn, hours_old: int, error: str = "boom") -> int:
+def add_dead(conn, hours_old: int, error: str = "boom", now=None) -> int:
     job = conn.execute("INSERT INTO jobs (type, status, attempts, last_error) VALUES ('x.y', 'dead', 5, %s) "
                        "RETURNING id", (error,)).fetchone()[0]
     return conn.execute("INSERT INTO dead_letters (job_id, type, error, created_at) VALUES (%s, 'x.y', %s, "
-                        "now() - make_interval(hours => %s)) RETURNING id", (job, error, hours_old)).fetchone()[0]
+                        "coalesce(%s::timestamptz, now()) - make_interval(hours => %s)) RETURNING id", (job, error, now, hours_old)).fetchone()[0]
 
 
 def test_acknowledging_a_dead_letter_is_audited_hides_it_from_the_main_list_and_keeps_it_viewable(signed, conn):
@@ -182,8 +182,8 @@ def test_acknowledging_twice_or_after_a_retry_is_refused(signed, conn):
     assert "ok=0" in late.headers["location"]
 
 
-def test_acknowledge_all_older_than_n_hours_takes_only_the_older_ones(signed, conn):
-    old, recent = add_dead(conn, 30), add_dead(conn, 2)
+def test_acknowledge_all_older_than_n_hours_takes_only_the_older_ones(signed, conn, clock):
+    old, recent = add_dead(conn, 30, now=clock.now()), add_dead(conn, 2, now=clock.now())
     response = signed.post("/dashboard/queue/ack-older", data={"csrf": token_for(signed), "hours": "24"})
     assert "ok=1" in response.headers["location"]
     states = dict(conn.execute("SELECT id, acknowledged_at IS NOT NULL FROM dead_letters").fetchall())
@@ -291,7 +291,7 @@ def test_the_dashboard_loads_nothing_from_outside_and_ships_no_inline_code_or_st
 
 def test_the_design_system_rules_are_in_the_stylesheet():
     css = (STATIC / "dashboard.css").read_text()
-    assert "prefers-color-scheme: light" in css and ":focus-visible" in css and "tabular-nums" in css
+    assert "color-scheme: light" in css and ":focus-visible" in css and "tabular-nums" in css
     assert "--s1: 8px" in css and "prefers-reduced-motion" in css and ".skeleton" in css
     assert not re.search(r"font-family:[^;]*(googleapis|fonts\.)", css)
 
