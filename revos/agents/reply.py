@@ -25,11 +25,20 @@ def run(env: AgentEnv) -> AgentOutput:
     label = triage.classification.label
     d, c = env.deal_id, env.contact_id
     message_id = env.input.get("message_id")
+    # The model proposes the label; code decides whether it can stand. A reply cannot accept a time that was
+    # never offered ("can we talk Thursday?" asks for times, it does not pick one): without offered slots an
+    # accept_slot label is corrected to interested, and the correction is recorded.
+    corrected_from = None
+    if label == "accept_slot" and not env.tools.call("crm.get_deal", {"deal_id": str(d)})["fields"].get(
+            "offered_slots"):
+        corrected_from, label = label, "interested"
     proposals = [make("classify_reply", d, c, {
         "message_id": message_id, "label": label, "confidence": triage.classification.confidence,
         "rationale": triage.classification.rationale,
-        "evidence_quote": triage.classification.quote},
+        "evidence_quote": triage.classification.quote,
+        **({"corrected_from": corrected_from} if corrected_from else {})},
         [], f"reply classified as {label}"
+        + (f" (the model said {corrected_from}, but no times were offered)" if corrected_from else "")
         + (f': "{triage.classification.quote}"' if triage.classification.quote else ""))]
     stage = _STAGE_FOR.get(label, DealStage.REPLIED)
     handoff = None

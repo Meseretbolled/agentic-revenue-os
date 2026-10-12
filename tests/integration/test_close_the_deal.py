@@ -527,3 +527,60 @@ def test_a_confirmation_in_the_prospects_own_time_zone_passes_the_claim_check_an
     confirmation = rig.world.mailer.sent[-1]
     assert "(your time, UTC-5)" in confirmation.subject and confirmation.attachments
     assert stage(conn) == "meeting" and len(rig.world.calendar.invites) == 1
+
+
+# --- an accept_slot label can only stand when times were offered ---------------------------------------------------------
+
+class SaysLabel(FakeLLM):
+    """A model that always answers with one label, as the real one did for "can we talk Thursday?"."""
+
+    def __init__(self, label: str) -> None:
+        super().__init__()
+        self.label = label
+
+    def classify_reply(self, reply):
+        from revos.ports.llm import ReplyClassification
+        text = reply.for_model().splitlines()[1]
+        return ReplyClassification(self.label, 0.9, "model said so", text, quote_verified=True)
+
+
+def first_touch_done(conn, ro_conn, pack, clock, llm):
+    rig = make_rig(conn, ro_conn, pack, clock, llm=llm)
+    first = rig.orch.handle_lead_created(rig.deal_id)
+    rig.orch.send_action(first.action_id)
+    return rig
+
+
+def test_case_1_accept_slot_before_any_times_were_offered_is_corrected_to_interested(conn, ro_conn, pack, clock):
+    rig = first_touch_done(conn, ro_conn, pack, clock, SaysLabel("accept_slot"))
+    result = rig.orch.handle_reply(rig.deal_id, mail("Yes, interested, can we talk Thursday?", "g1"))
+    assert (result.status, result.label) == ("completed", "interested")
+    (row,) = audit(conn, "reply.label_corrected", rig.deal_id)
+    assert (row["from"], row["to"]) == ("accept_slot", "interested") and "no meeting times" in row["reason"]
+    assert [r["label"] for r in audit(conn, "reply.classified", rig.deal_id)] == ["interested"]
+    assert audit(conn, "slots.offered", rig.deal_id) and conn.execute(
+        "SELECT payload->>'template' FROM actions WHERE type = 'follow_up'").fetchone()[0] == "meeting_offer"
+    assert audit(conn, "pipeline.needs_human", rig.deal_id) == [] and stage(conn) == "replied"
+
+
+def test_case_2_accept_slot_after_times_were_offered_still_books_the_meeting(conn, ro_conn, pack, clock):
+    rig = with_offer(conn, ro_conn, pack, clock, llm=SaysLabel("accept_slot"))
+    slot = offered_slots(conn)[0]
+    result = rig.orch.handle_reply(rig.deal_id, mail(accept_text(slot), "g2"))
+    send_all(rig)
+    assert (result.status, result.label) == ("completed", "accept_slot")
+    corrected = [r["message_id"] for r in audit(conn, "reply.label_corrected", rig.deal_id)]
+    assert corrected == ["<i1@brightside-optical.example>"]          # only the set-up reply, before any offer
+    assert stage(conn) == "meeting"
+
+
+def test_case_3_a_plain_interested_label_is_left_alone(conn, ro_conn, pack, clock):
+    rig = first_touch_done(conn, ro_conn, pack, clock, SaysLabel("interested"))
+    result = rig.orch.handle_reply(rig.deal_id, mail("Yes, interested, can we talk Thursday?", "g3"))
+    assert result.label == "interested" and audit(conn, "reply.label_corrected", rig.deal_id) == []
+
+
+def test_case_4_other_labels_are_never_touched_by_the_guard(conn, ro_conn, pack, clock):
+    rig = first_touch_done(conn, ro_conn, pack, clock, SaysLabel("not_interested"))
+    result = rig.orch.handle_reply(rig.deal_id, mail("No thanks, not for us.", "g4"))
+    assert result.label == "not_interested" and audit(conn, "reply.label_corrected", rig.deal_id) == []

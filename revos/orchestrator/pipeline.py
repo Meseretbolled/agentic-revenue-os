@@ -496,6 +496,11 @@ class Orchestrator:
                                   (payload["label"], payload["message_id"]))
             write_audit(self.conn, "orchestrator", "reply.classified", deal_id,
                         {"label": payload["label"], "confidence": payload["confidence"]})
+            if payload.get("corrected_from"):       # code overruled the model's label: on the record
+                write_audit(self.conn, "orchestrator", "reply.label_corrected", deal_id, {
+                    "from": payload["corrected_from"], "to": payload["label"],
+                    "message_id": payload.get("message_id"),
+                    "reason": "no meeting times had been offered, so no time could have been accepted"})
             self._learn_from_reply(deal, payload["label"])
         elif atype in {"suppress_contact", "cancel_scheduled_sends"}:
             self._opt_out(deal, atype, payload)
