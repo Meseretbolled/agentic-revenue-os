@@ -20,8 +20,9 @@
 {% endblock %}
 {% block body %}
 {% set total = o.funnel|sum(attribute='n') %}
-{% set won = (o.funnel|selectattr('stage', 'equalto', 'closed_won')|first).n %}
 {% set handed = (o.funnel|selectattr('stage', 'equalto', 'handoff')|first).n %}
+{# a handed-off deal has already closed, so "reached closed won" is closed_won plus handoff #}
+{% set won = (o.funnel|selectattr('stage', 'equalto', 'closed_won')|first).n + handed %}
 {% set waiting_n = o.approvals|length %}
 {% set won_pct = (100 * won / total)|round|int if total else 0 %}
 {% set wait_pct = [(100 * waiting_n / o.live)|round|int, 100]|min if o.live else 0 %}
@@ -56,7 +57,7 @@
     <p class="eyebrow">Portfolio posture</p>
     <h2 id="posture-h">How the portfolio looks</h2>
     <div class="donuts">
-      {{ donut(won_pct, 'good', 'Closed won', won ~ ' of ' ~ total ~ ' deals on the pipeline') }}
+      {{ donut(won_pct, 'good', 'Closed won (incl. handed off)', won ~ ' of ' ~ total ~ ' deals on the pipeline') }}
       {{ donut(wait_pct, 'attn', 'Waiting for approval', waiting_n ~ ' waiting, ' ~ o.live ~ ' live deals') }}
     </div>
   </section>
@@ -65,7 +66,7 @@
 <section class="tiles" aria-label="Deal counts">
   <a class="tile" href="/dashboard/pipeline"><span class="tile-label">Total deals</span><span class="tile-value">{{ total }}</span><span class="tile-cap">on the pipeline path, lost deals not counted</span></a>
   <a class="tile" href="/dashboard/pending"><span class="tile-label">Pending approval</span><span class="tile-value">{{ waiting_n }}</span><span class="tile-cap">waiting for a person's decision</span></a>
-  <a class="tile" href="/dashboard/pipeline"><span class="tile-label">Closed won</span><span class="tile-value">{{ won }}</span><span class="tile-cap">signed and closed</span></a>
+  <a class="tile" href="/dashboard/pipeline"><span class="tile-label">Closed won (incl. handed off)</span><span class="tile-value">{{ won }}</span><span class="tile-cap">signed and closed, including deals already handed off</span></a>
   <a class="tile" href="/dashboard/pipeline"><span class="tile-label">Handed off</span><span class="tile-value">{{ handed }}</span><span class="tile-cap">passed to customer success</span></a>
 </section>
 

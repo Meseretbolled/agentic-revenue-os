@@ -316,3 +316,10 @@ def test_the_deal_page_shows_a_linkedin_draft_marked_not_sent(signed, demo, conn
                  (did, json.dumps({"pieces": {"note": {"text": "NOTE TEXT"}, "message": {"text": "MSG TEXT"}}})))
     html = signed.get(f"/dashboard/deals/{did}").text
     assert "DRAFT - not sent" in html and "NOTE TEXT" in html and "MSG TEXT" in html
+
+
+def test_closed_won_counts_deals_that_reached_it_including_handed_off(signed, demo):
+    """The demo has one deal at handoff and none at closed_won: a handed-off deal has already closed."""
+    html = signed.get("/dashboard/").text
+    assert re.search(r'Closed won \(incl\. handed off\)</span><span class="tile-value">1</span>', html)
+    assert "1 of 6 deals on the pipeline" in html and "Closed won (incl. handed off)" in html
