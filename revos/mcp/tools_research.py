@@ -16,6 +16,13 @@ def _host_allowed(url: str, domain: str | None) -> bool:
     return parsed.scheme in {"http", "https"} and (host == domain or host.endswith("." + domain))
 
 
+def _provenance(item: Any) -> dict[str, str]:
+    """When and from where a real provider answered. The offline mock sets none of these, so its output is
+    exactly what it was before."""
+    return {k: v for k, v in (("fetched_at", item.fetched_at), ("origin", item.origin),
+                              ("note", getattr(item, "note", ""))) if v}
+
+
 def search(ctx: ToolContext, scope: RunScope, args: dict[str, Any]) -> dict[str, Any]:
     hits = ctx.research.search(str(args["query"]), max_results=5)
     shown, held = [], 0
@@ -25,7 +32,8 @@ def search(ctx: ToolContext, scope: RunScope, args: dict[str, Any]) -> dict[str,
             ctx.on_quarantine(snippet, scope.deal_id)
             held += 1
         else:
-            shown.append({"title": hit.title, "url": hit.url, "snippet": snippet.for_model()})
+            shown.append({"title": hit.title, "url": hit.url, "snippet": snippet.for_model(),
+                          **_provenance(hit)})
     return {"results": shown, "held_for_review": held}
 
 
@@ -43,7 +51,7 @@ def fetch_site(ctx: ToolContext, scope: RunScope, args: dict[str, Any]) -> dict[
         return {"url": url, "found": True, "content": None,
                 "note": "this page contains text that tries to instruct the system; "
                         "it was withheld and a person will review it"}
-    return {"url": url, "found": True, "content": content.for_model()}
+    return {"url": url, "found": True, "content": content.for_model(), **_provenance(page)}
 
 
 SPECS = [

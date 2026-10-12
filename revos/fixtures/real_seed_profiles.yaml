@@ -1,0 +1,44 @@
+# Seed leads for REAL public companies, used with ENRICHMENT_MODE=tavily (real web research). Keyed by segment
+# pack id, like seed_profiles.yaml, and loaded by `revos seed <tag> --real <name>`.
+#
+# HONESTY NOTE: the COMPANIES are real and are researched only from their own public websites. Everything else is
+# demo scaffolding and says so:
+#   * the CONTACT is fictional and its address is a plus-address of the owner's own PROSPECT_TEST_EMAIL
+#     (`email_tag`), never anyone at the company; nothing is ever sent to the company's domain (the send gate's
+#     recipient allowlist enforces it, and `seed_lead` refuses an address at the company's domain);
+#   * the `fields` are SYNTHETIC CRM SIGNALS (intent and engagement only). No fact about the company is
+#     invented here: what is known about the company comes only from the cited research, each fact with its
+#     source URL and fetch time;
+#   * neither company is a published COOL case study, a customer or a competitor, as far as the repo records.
+#
+# `hq_location` (optional) is the lead's known location; when set, a web result must mention it to be accepted.
+franchise_brands:
+  orangetheory:
+    company: Orangetheory Fitness
+    domain: orangetheory.com
+    contact: Jordan Avery
+    contact_note: fictional demo contact (invented); the address is the owner's own inbox
+    email_tag: real-orangetheory
+    timezone: America/New_York
+    fields:
+      contact_seniority: vp
+      requested_demo: true
+      visited_pricing_page: true
+      website_visits_30d: 6
+      local_marketing_pain_mentioned: true
+      clicked_case_study: true
+agencies:
+  hawkemedia:
+    company: Hawke Media
+    domain: hawkemedia.com
+    contact: Riley Quinn
+    contact_note: fictional demo contact (invented); the address is the owner's own inbox
+    email_tag: real-hawkemedia
+    timezone: America/Los_Angeles
+    fields:
+      contact_seniority: director
+      requested_demo: true
+      visited_pricing_page: true
+      website_visits_30d: 5
+      reporting_pain_mentioned: true
+      clicked_case_study: true

@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -663,8 +666,11 @@ def seed(
     signer_email: str = typer.Option(None, "--signer-email", help="the signer's address on the lead record "
                                      "(default: a plus-address of PROSPECT_TEST_EMAIL; 'sender' means "
                                      "GMAIL_ADDRESS, which a free Dropbox Sign account in test mode needs)"),
+    real: str = typer.Option(None, "--real", help="a REAL public company from real_seed_profiles.yaml "
+                             "(orangetheory, hawkemedia); researched with ENRICHMENT_MODE=tavily; the "
+                             "contact is still your own allowlisted inbox"),
 ) -> None:
-    """Create one fictional lead addressed to a plus-address of PROSPECT_TEST_EMAIL and queue it."""
+    """Create one lead addressed to a plus-address of PROSPECT_TEST_EMAIL and queue it."""
     import os
     from pathlib import Path
 
@@ -677,12 +683,20 @@ def seed(
 
     load_env_file()
     packs = load_all(Path(__file__).resolve().parent.parent.parent / "packs")
+    real_chosen = None
+    if real:
+        from revos.seed import real_profile
+        try:
+            segment, real_chosen = real_profile(real)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
     if segment is None:
         segment = next((p.id for p in packs.values() if p.meta.demo), None)
     if segment not in packs:
         typer.echo(f"no segment pack {segment!r}; have: {', '.join(sorted(packs))}", err=True)
         raise typer.Exit(1)
-    email = demo_address(tag)
+    email = demo_address(real_chosen["email_tag"] if real_chosen else tag)
     fields: dict | None = None
     timezone: str | None = None
     if profile:
@@ -704,6 +718,14 @@ def seed(
                                       if signer_email.strip().lower() == "sender"
                                       else signer_email.strip().lower())
         timezone = chosen.get("timezone")
+    if real_chosen:
+        company, domain, contact = real_chosen["company"], real_chosen["domain"], real_chosen["contact"]
+        fields = {**real_chosen["fields"],
+                  **({"hq_location": real_chosen["hq_location"]} if real_chosen.get("hq_location") else {})}
+        timezone = real_chosen.get("timezone")
+        if os.environ.get("ENRICHMENT_MODE", "mock").strip().lower() != "tavily":
+            typer.echo("note: ENRICHMENT_MODE is not 'tavily', so this real company is NOT researched; "
+                       "set ENRICHMENT_MODE=tavily and restart `revos run`", err=True)
     with connect() as conn:
         conn.autocommit = True
         migrate(conn)
@@ -712,6 +734,79 @@ def seed(
                                     domain=domain, contact_name=contact, email=email, fields=fields,
                                     timezone=timezone)
     typer.echo(f"{'seeded' if created else 'already seeded'}: deal {deal_id} for {email}")
+
+
+@app.command("enrich")
+def enrich(
+    company: str = typer.Argument(..., help="the company's name, as the lead has it"),
+    domain: str = typer.Option(..., "--domain", help="its web domain, for example orangetheory.com"),
+    location: str = typer.Option(None, "--location", help="its location, when known (a result must name it)"),
+    segment: str = typer.Option(None, help="the segment pack whose extractors read the pages"),
+    replay: bool = typer.Option(False, "--replay", help="answer from the recorded cache: no network, no key"),
+) -> None:
+    """Research one company on the web: print what was ACCEPTED (source URL, fetch time) and what was REJECTED
+    (with the reason). Drafts nothing, sends nothing, writes no database row."""
+    from revos.adapters.mock import build_mock_world
+    from revos.adapters.tavily.cache import ResearchCache
+    from revos.adapters.tavily.client import TavilyClient
+    from revos.adapters.tavily.research import TavilyResearch
+    from revos.composition import TAVILY_BUNDLED_CACHE, TAVILY_CACHE_DIR
+    from revos.domain.untrusted import UntrustedText
+    from revos.env import load_env_file
+    from revos.skills.web_research import HitView, PageView, run_web_enrichment
+
+    load_env_file()
+    packs = load_all(Path(__file__).resolve().parent.parent.parent / "packs")
+    if segment is None:
+        segment = next((p.id for p in packs.values() if p.meta.demo), None)
+    if segment not in packs:
+        typer.echo(f"no segment pack {segment!r}; have: {', '.join(sorted(packs))}", err=True)
+        raise typer.Exit(1)
+    pack = packs[segment]
+    key = (os.environ.get("TAVILY_API_KEY") or "").strip()
+    if not replay and not key:
+        typer.echo("no TAVILY_API_KEY: use --replay to run from the recorded cache", err=True)
+        raise typer.Exit(1)
+    cap = int(os.environ.get("TAVILY_MAX_CREDITS", "20"))
+    research = TavilyResearch(None if replay else TavilyClient(key), ResearchCache(
+        TAVILY_CACHE_DIR, TAVILY_BUNDLED_CACHE), build_mock_world().research, max_credits=cap, replay=replay)
+    held: list[str] = []
+
+    def fenced(url: str, text: str, html: bool = False) -> str | None:
+        wrapped = UntrustedText.wrap("web_page", url, text, is_html=html, max_chars=20_000)
+        if wrapped.flagged:                       # instruction-like text is never read, only counted
+            held.append(url)
+            return None
+        return text
+
+    def search(query: str) -> list[HitView]:
+        return [HitView(h.title, h.url, h.snippet, h.fetched_at, h.origin, h.note)
+                for h in research.search(query) if not h.url or fenced(h.url, h.snippet) is not None]
+
+    def fetch(url: str) -> PageView | None:
+        page = research.fetch(url)
+        if page is None:
+            return None
+        return PageView(url, fenced(url, page.content, page.is_html), page.fetched_at, page.origin)
+
+    outcome = run_web_enrichment(search=search, fetch=fetch, company=company, domain=domain.lower(),
+                                 location=location, web=pack.enrichment.web,
+                                 extractors=pack.enrichment.extractors)
+    typer.echo(f"{company} ({domain}) with the {segment} pack, "
+               f"{'replaying the cache' if replay else 'live'}")
+    typer.echo(f"\nACCEPTED ({len(outcome.facts)} fact(s) from {len(outcome.accepted_urls)} page(s)):")
+    for item in outcome.facts:
+        typer.echo(f"  {item.field} = {item.value}\n    \"{item.quote[:200]}\"\n"
+                   f"    source {item.url}   fetched {item.fetched_at or 'n/a'}")
+    typer.echo(f"\nREJECTED ({len(outcome.rejected)}):")
+    for item in outcome.rejected:
+        typer.echo(f"  {item.url}\n    " + "; ".join(item.reasons))
+    if held or outcome.withheld:
+        typer.echo(f"\nWITHHELD for instruction-like text: {', '.join([*held, *outcome.withheld])}")
+    if outcome.fell_back:
+        typer.echo(f"\nFELL BACK to the offline behaviour: {outcome.fallback_reason}")
+    typer.echo(f"\nlive calls {research.live_calls}, cache hits {research.cache_hits}, "
+               f"Tavily credits used {research.credits_used} (cap {cap})")
 
 
 @app.callback()

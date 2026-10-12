@@ -30,12 +30,21 @@ def lead_facts(fields: Mapping[str, Any], pack: Pack) -> dict[str, Any]:
 
 DEMO_FACT_PREFIX = "DEMO"          # fact ids that come from a fictional demo profile, never from a page
 DEMO_SOURCE_PREFIX = "fictional demo profile"
+WEB_FACT_PREFIX = "W"          # facts from real web research (see agents/enrichment.py)
 
 
 def evidence_from_fields(fields: Mapping[str, Any]) -> Evidence:
     """Researched facts are stored as fact:<id> (the sentence) and fact_source:<id> (the page)."""
     plain = clean_fields(fields)
-    ids = sorted((k.split(":", 1)[1] for k in plain if k.startswith("fact:")),
+
+    def citable(fact_id: str) -> bool:
+        """A fact from real web research can be cited only with a stored source URL and fetch time."""
+        if not fact_id.startswith(WEB_FACT_PREFIX) or fact_id.startswith(DEMO_FACT_PREFIX):
+            return True
+        return str(plain.get(f"fact_source:{fact_id}", "")).startswith(("http://", "https://")) \
+            and bool(plain.get(f"fact_fetched:{fact_id}"))
+
+    ids = sorted((k.split(":", 1)[1] for k in plain if k.startswith("fact:") and citable(k.split(":", 1)[1])),
                  key=lambda i: (i.startswith(DEMO_FACT_PREFIX), len(i), i))    # real research comes first
     return Evidence.of(EvidenceItem(i, plain[f"fact:{i}"], plain.get(f"fact_source:{i}"),
                                     demo=i.startswith(DEMO_FACT_PREFIX)) for i in ids)

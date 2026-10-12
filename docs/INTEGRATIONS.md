@@ -287,7 +287,7 @@ that will run as REAL and fails stops the start (`--force` overrides, the failur
 * **Real by default**: keys in `.env` select the real adapter, missing keys select the mock. With a
   key present and the service down the real adapter raises (jobs retry, doctor fails); there is no
   fallback to a mock. `revos doctor` prints `will run as: REAL|MOCK` per service.
-* **Not built yet, so MOCK even with a key**: Tavily. There is no Tavily adapter: the key works, but research runs on the offline mock. For this service, `revos doctor` and the banner say `key OK, adapter not built yet:
+* **Mock unless switched on**: Tavily. An adapter exists (see "Real web research" below) but `ENRICHMENT_MODE` defaults to `mock`, so research runs on the offline mock. While the mode is `mock`, for this service, `revos doctor` and the banner say `key OK, adapter not built yet:
   runs as MOCK` (or `key NOT working (...)`) instead of `REAL OK`.
 * **Demo leads are plus-addresses** of `PROSPECT_TEST_EMAIL` (`name+acme@gmail.com`): each is a
   distinct HubSpot contact (HubSpot merges by email and refuses `.test` and `.example`), and every
@@ -391,7 +391,7 @@ and the trace says they are fictional demo data. They are never presented as rea
 
 `revos doctor` checks each with one harmless read and prints one line: `REAL OK`, `REAL FAILED`
 (with a category such as `auth`, `timeout`, `network`) or `MOCK` (key missing). It never prints a
-value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dropbox Sign were `REAL OK`. Tavily has no adapter: its key works, but research runs on the offline mock (see below).
+value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dropbox Sign were `REAL OK`. Tavily research is off by default (`ENRICHMENT_MODE=mock`); see "Real web research" below for its state.
 
 | Service | What doctor calls | Status |
 |---|---|---|
@@ -401,7 +401,7 @@ value. In the owner's last run Postgres, HubSpot, Slack, Gmail, Fireflies and Dr
 | Gmail | IMAP login and logout only | REAL OK (owner's run) |
 | Fireflies | GraphQL `{ user { user_id } }` | REAL OK; the transcript adapter is built (see the Fireflies section) |
 | Dropbox Sign | `GET /v3/account`; fails if `DROPBOX_SIGN_TEST_MODE` is not true | REAL OK; a test-mode request was created and cancelled live (see its section) |
-| Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | **No adapter is built.** The key works (the owner confirmed), but no Tavily code feeds the agents: research runs on the offline mock, and doctor says `adapter not built yet: runs as MOCK` |
+| Tavily | `POST https://api.tavily.com/search` with `Authorization: Bearer <key>` and a JSON body (one credit) | adapter built, off by default; **the API answered `403 Forbidden` (an HTML page from the CDN) for the owner's key when the adapter was built, while an invalid key got a JSON 401, so it has never run live** (see "Real web research") |
 | Tunnel URL | `GET <PUBLIC_BASE_URL>/healthz` | unverified live |
 
 ## Commands
@@ -492,3 +492,36 @@ Pending (veto countdown, approvals, hard blocks), Queue and dead letters, Lesson
 Verified live with `crm.objects.owners.read` and `sales-email-read` added: owners list, email lookup and email
 creation all work. Emails are found by `hs_email_message_id` (HubSpot does not allow searching the email text). Email jobs that hit the missing read scope wait in the dead
 letters: add the scope, then press Retry on the dashboard's Queue page (or `revos queue retry <id>`).
+
+## Real web research (Tavily), `ENRICHMENT_MODE=mock|tavily`
+
+Default `mock`: nothing below runs and enrichment is exactly as before. With `ENRICHMENT_MODE=tavily` (needs
+`TAVILY_API_KEY`, or `ENRICHMENT_CACHE=replay` to answer only from the recorded cache with no network and no key):
+
+* The enrichment agent searches the web for the lead (`{company} {domain}`), through the same scoped, fenced and
+  scanned tools as before. A result is accepted **only if** its page is on the lead's own domain, it names the
+  company (kind-of-company words such as "media" or "group" do not count; they live in
+  `revos/fixtures/generic_name_words.yaml`), and, when the lead has an `hq_location`, it names that place
+  (`revos/skills/entity_match.py`). Every other result is rejected and audited as `enrichment.rejected_result` with
+  the reason. A page can be fetched only if the search returned it. The pack's own `enrichment.yaml` extractors read
+  the accepted text, so no code names a segment; the call caps (`web.max_searches`, `web.max_page_fetches`) default
+  to 1 search and 2 page fetches per lead.
+* A fact is stored as `fact:W<n>` with `fact_source:W<n>` (its URL) and `fact_fetched:W<n>` (the fetch time). A
+  `W` fact missing either is not citable, so a draft cannot use it (the claim checker sees it as unknown evidence).
+* Every answer is cached (`var/cache/tavily/`, one JSON file per request, with its fetch time and credits); a
+  repeat costs nothing and replay works offline. `TAVILY_MAX_CREDITS` (default 20) caps credits per process.
+* A failing, capped or empty search falls back to the offline mock and is audited as
+  `enrichment.fell_back_to_mock` with the reason; the run continues.
+* **Nothing is ever sent to a researched company.** Leads use the owner's allowlisted inbox; `seed_lead` refuses an
+  address at the company's domain and the send gate's recipient allowlist refuses any other.
+* Real companies for the demo are in `revos/fixtures/real_seed_profiles.yaml` (`revos seed <tag> --real orangetheory`
+  or `--real hawkemedia`); the existing seed profiles are untouched. `revos enrich <company> --domain <domain>
+  [--location ...] [--replay]` prints accepted facts (source URL, fetch time) and rejected results (reason).
+
+**State, plainly:** all of this is tested offline with SYNTHETIC fixtures (`tests/fixtures/tavily/README.md`). It has
+never run against the live API: when it was built, the owner's key got `403 Forbidden` (an HTML page from the
+CDN, not Tavily's JSON) while an invalid key got a JSON `401`, so the key looks blocked or revoked at the edge.
+Tavily's real answer shape (`results[].content`, `usage.credits`, `/extract` `raw_content`) is taken from its
+documentation and is unverified. The pack extractors are SAMPLE rules: they do not know "studios" or "fitness", and
+the agencies pack's `enriched` exit criterion needs `client_count`, so a real company may stop at that stage until
+the lead record or the extractors are extended.

@@ -199,9 +199,18 @@ class Extractor(Strict):
         return self
 
 
+class WebResearch(Strict):
+    """How a real web search is run for a lead. Defaults suit every pack; a pack may override them."""
+
+    queries: list[str] = Field(default_factory=lambda: ["{company} {domain}"], min_length=1)
+    max_searches: int = Field(default=1, ge=1, le=3)       # search calls per lead
+    max_page_fetches: int = Field(default=2, ge=0, le=5)   # page extractions per lead
+
+
 class EnrichmentConfig(Strict):
     pages: list[str] = Field(min_length=1)           # paths on the company's own site
     extractors: list[Extractor] = Field(min_length=1)
+    web: WebResearch = Field(default_factory=WebResearch)
 
     @field_validator("pages")
     @classmethod

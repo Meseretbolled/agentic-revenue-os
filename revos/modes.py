@@ -73,6 +73,15 @@ def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
 
     llm_why = ("" if llm_live(env) else "LLM_MODE is fake" if env.get("LLM_MODE", "fake") != "live"
                else "LLM_MODE=live but ANTHROPIC_API_KEY is missing: the app refuses to start")
+    def tavily_mode(e: Mapping[str, str]) -> Mode:
+        replay = (e.get("ENRICHMENT_CACHE") or "live").strip().lower() == "replay"
+        if replay:
+            return Mode("Tavily", REAL, "ENRICHMENT_MODE=tavily, replaying the recorded cache (no network)")
+        if _has(e, "TAVILY_API_KEY"):
+            return Mode("Tavily", REAL, "ENRICHMENT_MODE=tavily")
+        return Mode("Tavily", MOCK, "ENRICHMENT_MODE=tavily but no TAVILY_API_KEY: the app refuses to start",
+                    built=True)
+
     return [
         Mode("Postgres", REAL),
         Mode("LLM budget", REAL if llm_live(env) else MOCK, llm_why),
@@ -84,7 +93,8 @@ def integration_modes(env: Mapping[str, str] | None = None) -> list[Mode]:
              "" if fireflies_configured(env) else "no key"),
         Mode("Dropbox Sign", REAL if dropbox_sign_configured(env) else MOCK,
              "TEST MODE only" if dropbox_sign_configured(env) else "no key"),
-        not_built("Tavily", "TAVILY_API_KEY", "a later step"),
+        tavily_mode(env) if (env.get("ENRICHMENT_MODE") or "mock").strip().lower() == "tavily"
+        else not_built("Tavily", "TAVILY_API_KEY", "a later step"),
         Mode("Tunnel URL", REAL if _has(env, "PUBLIC_BASE_URL") else MOCK, "" if _has(env, "PUBLIC_BASE_URL")
              else "PUBLIC_BASE_URL is not set: Slack buttons will not work"),
     ]

@@ -86,7 +86,7 @@ WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturd
 PLUS_TAG = re.compile(r"\+([0-9a-f]{8})@")
 CLOSED_STAGES = frozenset({"closed_won", "closed_lost", "do_not_contact", "handoff"})
 SENDABLE = {"first_touch", "follow_up", "send_io", "crm_update", "crm_note", "book_meeting", "handoff"}
-FIELD_PREFIXES = ("fact:", "fact_source:", "quote:")
+FIELD_PREFIXES = ("fact:", "fact_source:", "fact_fetched:", "quote:")
 EXTRA_FIELDS = {"company_domain", "decision_maker_name", "decision_maker_role", "signer_name",
                 "signer_name_source", "signer_role"}
 # What the IO is built from: a change to any of these is a new IO run.
@@ -139,7 +139,7 @@ class Orchestrator:
                  plus_bases: frozenset[str] = frozenset(),
                  send_window_bypass: bool = False, domain_cap_bypass: bool = False,
                  notifier: Any = None, veto_window_seconds: int | None = None,
-                 sender_email: str = "") -> None:
+                 sender_email: str = "", enrichment_mode: str = "mock") -> None:
         self.conn, self.ro_conn, self.clock, self.packs = conn, ro_conn, clock, packs
         self.plus_bases, self.send_window_bypass = plus_bases, send_window_bypass
         self.domain_cap_bypass = domain_cap_bypass
@@ -153,6 +153,7 @@ class Orchestrator:
         self.customer_success_owner = customer_success_owner
         self.inbox, self.crm_sync, self.daily_cap = inbox, crm_sync, daily_cap
         self.sender_email = sender_email                # the From address shown on a logged outbound email
+        self.enrichment_mode = enrichment_mode          # mock (default) or tavily: how enrichment looks up
         self.store = RunStore(conn)
 
     def _audit_slots(self, deal_id: UUID, payload: Mapping[str, Any]) -> None:
@@ -521,6 +522,7 @@ class Orchestrator:
             if bad:
                 raise ProposalRejected("field(s) not allowed for enrichment: " + ", ".join(bad))
             self._merge_fields(deal_id, props)
+            self._audit_enrichment(deal, payload)
         elif atype == "score":
             facts = lead_facts(deal["fields"] or {}, pack)
             result = score_lead(facts, pack.scoring)
@@ -579,6 +581,30 @@ class Orchestrator:
                    "not_interested": "reply_negative", "unsubscribe": "reply_negative"}.get(label)
         if outcome:                     # an out-of-office is not a person's answer: no outcome
             lesson_loop.record_outcome(self.conn, deal_id, outcome, self.clock)
+
+    def _agent_input(self, agent: str) -> dict[str, Any] | None:
+        """Run settings for an agent. Only enrichment has one, and only when real web research is switched on:
+        in the default mode the input stays empty, so a run is recorded exactly as before."""
+        if agent == "enrichment" and self.enrichment_mode == "tavily":
+            return {"enrichment_mode": "tavily"}
+        return None
+
+    def _audit_enrichment(self, deal: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
+        meta = payload.get("enrichment")
+        if not meta:
+            return
+        deal_id = deal["id"]
+        for item in payload.get("rejected_results", []):
+            write_audit(self.conn, "orchestrator", "enrichment.rejected_result", deal_id,
+                        {"url": item["url"], "reasons": item["reasons"], "origin": item.get("origin", "")})
+        if meta.get("fell_back_to_mock"):
+            write_audit(self.conn, "orchestrator", "enrichment.fell_back_to_mock", deal_id,
+                        {"reason": meta.get("fallback_reason", ""), "calls": meta.get("calls", 0)})
+        usage = getattr(self.research, "credits_used", None)
+        write_audit(self.conn, "orchestrator", "enrichment.completed", deal_id, {
+            "mode": meta.get("mode"), "calls": meta.get("calls", 0), "accepted": meta.get("accepted", []),
+            "rejected": len(payload.get("rejected_results", [])), "withheld": meta.get("withheld", []),
+            "held_for_review": meta.get("held_for_review", 0), "credits_used_so_far": usage})
 
     def _snooze(self, deal: Mapping[str, Any], payload: Mapping[str, Any]) -> None:
         """Pause the lead until the stated return date, bounded, and wake it up with a timer."""
@@ -697,7 +723,7 @@ class Orchestrator:
                     ("scoring", "score", DealStage.ENRICHED, DealStage.SCORED)):
                 if DealStage(self._deal(deal_id)["stage"]) is not stage_in:
                     continue
-                run = self.run_agent(deal_id, agent, step)
+                run = self.run_agent(deal_id, agent, step, input_=self._agent_input(agent))
                 runs.append((agent, run.status))
                 if run.status != "completed":
                     return stop("needs_human", run.human_reason)
