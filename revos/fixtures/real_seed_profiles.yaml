@@ -11,7 +11,8 @@
 #     source URL and fetch time;
 #   * neither company is a published COOL case study, a customer or a competitor, as far as the repo records.
 #
-# `hq_location` (optional) is the lead's known location; when set, a web result must mention it to be accepted.
+# `industry` and `client_count` are lead-record fields the packs' `enriched` stage requires; each is commented with its
+# basis. `hq_location` (optional) is the lead's known location; when set, a web result must mention it to be accepted.
 franchise_brands:
   orangetheory:
     company: Orangetheory Fitness
@@ -21,6 +22,7 @@ franchise_brands:
     email_tag: real-orangetheory
     timezone: America/New_York
     fields:
+      industry: fitness      # the lead record's classification (the franchise pack's `enriched` stage needs it)
       contact_seniority: vp
       requested_demo: true
       visited_pricing_page: true
@@ -36,6 +38,10 @@ agencies:
     email_tag: real-hawkemedia
     timezone: America/Los_Angeles
     fields:
+      # The agencies pack's `enriched` stage needs client_count. 6000 is the lower bound from Hawke Media's own
+      # homepage ("over 6,000 brands", https://hawkemedia.com, read 2026-10-12): a number the site states,
+      # entered on the lead record because the pack's SAMPLE extractor does not read "brands".
+      client_count: 6000
       contact_seniority: director
       requested_demo: true
       visited_pricing_page: true

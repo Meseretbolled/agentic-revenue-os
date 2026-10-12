@@ -518,10 +518,20 @@ Default `mock`: nothing below runs and enrichment is exactly as before. With `EN
   or `--real hawkemedia`); the existing seed profiles are untouched. `revos enrich <company> --domain <domain>
   [--location ...] [--replay]` prints accepted facts (source URL, fetch time) and rejected results (reason).
 
-**State, plainly:** all of this is tested offline with SYNTHETIC fixtures (`tests/fixtures/tavily/README.md`). It has
-never run against the live API: when it was built, the owner's key got `403 Forbidden` (an HTML page from the
-CDN, not Tavily's JSON) while an invalid key got a JSON `401`, so the key looks blocked or revoked at the edge.
-Tavily's real answer shape (`results[].content`, `usage.credits`, `/extract` `raw_content`) is taken from its
-documentation and is unverified. The pack extractors are SAMPLE rules: they do not know "studios" or "fitness", and
-the agencies pack's `enriched` exit criterion needs `client_count`, so a real company may stop at that stage until
-the lead record or the extractors are extended.
+**State, plainly:** run LIVE on 2026-10-12 for Orangetheory Fitness (orangetheory.com, franchise pack) and Hawke Media
+(hawkemedia.com, agencies pack): 2 searches and 2 page extractions, 2 credits reported. Results, replayable offline from
+`revos/fixtures/tavily_recorded_live_2026-10-12/`:
+
+* Hawke Media: 1 accepted fact (`is_agency`, "Hawke Media is the Top Performance Marketing Agency in the U.S.", source
+  `https://hawkemedia.com`); 4 rejected (LinkedIn, Trustpilot, the LA Times and the founder's own site: not the
+  company's domain).
+* Orangetheory: 0 facts; its homepage was accepted but the SAMPLE extractors do not read "1,500 studios worldwide"
+  (the franchise pack's pattern wants "locations") or "Franchisor"; 4 rejected (Wikipedia, Instagram, YouTube and the
+  merchandise shop: not the company's domain). The run fell back and said so.
+* Wrong-company results accepted: 0 of 8 (live and replayed).
+
+Earlier the same key got `403 Forbidden` (an HTML page from the CDN); after the owner fixed it, the calls worked.
+Everything else (caps, fallback, injection, citation, never-send) is proven offline with SYNTHETIC fixtures
+(`tests/fixtures/tavily/README.md`). Not verified live: plan limits, an instruction-like page, a failing key.
+The `enriched` exit criterion needs `industry` (franchise) or `client_count` (agencies): the real seed profiles carry
+them, each commented with its basis, because the pack extractors would not find them.

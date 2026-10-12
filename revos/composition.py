@@ -160,7 +160,7 @@ def build_mail(conn: psycopg.Connection):
 
 ENRICHMENT_MODES = ("mock", "tavily")
 TAVILY_CACHE_DIR = Path(__file__).resolve().parent.parent / "var" / "cache" / "tavily"
-TAVILY_BUNDLED_CACHE = Path(__file__).resolve().parent / "fixtures" / "tavily_cache"
+TAVILY_BUNDLED_CACHE = Path(__file__).resolve().parent / "fixtures" / "tavily_recorded_live_2026-10-12"
 
 
 def enrichment_mode(env: Mapping[str, str] | None = None) -> str:

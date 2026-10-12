@@ -38,7 +38,7 @@ flowchart LR
   LLM["Claude Agent SDK<br/>Sonnet, Haiku"]:::agent
   PK["Segment packs<br/>2 packs, YAML"]:::config
   LS[("Lessons store<br/>tag + keyword")]:::store
-  RS["Web research<br/>MOCK, no Tavily"]:::ext
+  RS["Web research<br/>mock or Tavily"]:::ext
   WH --> Q
   SC --> Q
   CLI --> Q
@@ -107,7 +107,7 @@ flowchart LR
 | Allowlist policy | Action types come from the pack's `autonomy_levels`; unknown types are denied. Hard blocks never send: failed claim check, injection flag, suppression, discount over the maximum, invalid IO (`policy/engine.py`) |
 | Autonomy, veto, kill switch | `autonomous` or `approval` mode (a `system_settings` row read on every decision); tier A first touches wait 60 s and Cancel is a compare-and-set, so cancel at second 59 and send at second 60 cannot both win; the kill switch holds outbound actions and re-queues them once on release (`policy/settings.py`) |
 | Send gate | Re-reads approval, contact and suppression from the database; demo recipient allowlist, recipient-local send window, atomic daily and per-domain caps (`policy/gate.py`) |
-| Untrusted content | Replies, pages and transcripts are wrapped, scanned (hidden HTML too), quarantined, never obeyed (`domain/injection.py`) |
+| Untrusted content | Replies, pages and transcripts are wrapped, scanned (hidden HTML too), quarantined, never obeyed (`domain/injection.py`); a web result is kept only if its domain, name and known location match the lead (`skills/entity_match.py`) |
 | Claim checker | Code rejects any undeclared number, name or date, then a model verifier checks each cited fact; no verifier fails closed; a failed line is replaced by the pack's wording (`skills/claims.py`) |
 | Audit | `audit_log` is append-only (trigger), written in the same transaction as the change, one correlation id per event |
 
@@ -224,7 +224,8 @@ A segment is a pack of YAML under `packs/` (pack, enrichment, icp, messaging, po
 | Claude (Agent SDK) | Real with `LLM_MODE=live`, spend-capped; offline fake otherwise | Sonnet drafts, Haiku classifies |
 | HubSpot, Gmail, Slack, Fireflies | Real | CRM writes via the outbox; mail only to the owner's allowlisted addresses; Slack buttons need a tunnel; Fireflies polled |
 | Dropbox Sign | **Test mode only** | Nothing is legally binding |
-| Tavily research, calendar | **Not built / mock** | Tavily's key works but no adapter exists; research and calendar run on mocks |
+| Tavily research | **Adapter built; off by default** (`ENRICHMENT_MODE=mock`) | Run live on 2 real companies on 2026-10-12 (4 live calls); tests use synthetic fixtures and those 2 recordings |
+| Calendar | **Mock** | No real calendar is connected |
 | LinkedIn | **Draft-only** | No provider; a person copies the text |
 | Rate card, leads | **Sample, fictional** | Case studies are public testimonials with links |
 
@@ -238,4 +239,4 @@ A segment is a pack of YAML under `packs/` (pack, enrichment, icp, messaging, po
 
 ## 9. Known limits and next steps
 
-Research and calendar are mocks: next are a Tavily adapter with entity matching (a result tied to the right company) and a real calendar. Scoring is rules only: next is a shadow-mode ML scorer logged beside the rules before it can move a tier. New accounts start in `autonomous` mode: next is `approval` by default. LinkedIn has no human-approved send step yet. One worker process; live runs covered two fictional leads, not volume.
+The calendar is a mock: next is a real one. Tavily research is opt-in and was verified live on two companies only; the pack extractors are SAMPLE rules that missed Orangetheory's facts (next: extend them). Scoring is rules only: next is a shadow-mode ML scorer logged beside the rules before it can move a tier. New accounts start in `autonomous` mode: next is `approval` by default. LinkedIn has no human-approved send step yet. One worker process; live runs covered two fictional leads, not volume.
