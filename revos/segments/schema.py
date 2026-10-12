@@ -306,11 +306,33 @@ class EmailTemplate(Strict):
         return check_template(value, ("unsubscribe_line", "postal_address"))
 
 
+class LinkedInConfig(Strict):
+    """How this segment's LinkedIn DRAFTS read. Drafts only: a person copies and sends them; nothing in the
+    system can send to LinkedIn. The note is a connection request (at most 300 characters, LinkedIn's limit);
+    the message follows once connected and carries the one ask."""
+
+    tone: list[str] = Field(min_length=1)
+    note_max_chars: int = Field(ge=60, le=300)
+    message_max_chars: int = Field(ge=120, le=1900)
+    use_case_study: bool = False                  # whether the follow-up message cites a library case study
+    note_template: str = Field(min_length=1)
+    message_template: str = Field(min_length=1)
+    note_fallback: str = Field(min_length=1)      # the pack's wording if a model-written line fails a check
+    message_fallback: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _templates(self) -> "LinkedInConfig":
+        for name in ("note_template", "message_template"):
+            check_template(getattr(self, name), ("personalised_line",))
+        return self
+
+
 class Messaging(Strict):
     source_note: str = Field(min_length=1)
     tone: list[str] = Field(min_length=1)
     pillars: list[Pillar] = Field(min_length=1)
     templates: dict[str, EmailTemplate]
+    linkedin: LinkedInConfig | None = None          # absent: this segment has no LinkedIn drafts yet
     # Short pieces of wording the code fills in (a reply acknowledgement, how the slot list is
     # introduced). They are approved text for the claim checker, like the templates.
     snippets: dict[str, str] = Field(default_factory=dict)

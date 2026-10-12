@@ -111,7 +111,8 @@ def test_no_pack_states_a_figure_in_its_wording():
     for pid in PACKS:
         text = (PACKS_DIR / pid / "messaging.yaml").read_text()
         wording = text[text.index("pillars:"):]                            # the wording, not the source note
-        wording = "\n".join(line for line in wording.splitlines() if not line.lstrip().startswith("#"))
+        wording = "\n".join(line for line in wording.splitlines() if not line.lstrip().startswith("#")
+                            and "_max_chars:" not in line)          # a length limit is config, not wording
         assert not re.search(r"\d", wording.replace("{{", "").replace("}}", "")), pid
 
 

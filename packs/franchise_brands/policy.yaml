@@ -18,6 +18,7 @@ autonomy_levels:
   generate_io: auto
   send_io: auto                     # only after the IO validator passes (policy hard block)
   social_message: needs_approval    # draft-only in code; a person sends it
+  linkedin_draft: auto              # a draft for a person to copy and send; nothing here can send it
   lesson_write: auto                # a lesson with quoted evidence, stored for later drafts
   book_meeting: auto                # a calendar invite for a slot we offered and they accepted
   handoff: auto                     # the closed-won summary for Customer Success

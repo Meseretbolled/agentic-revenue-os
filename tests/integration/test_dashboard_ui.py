@@ -306,3 +306,13 @@ def test_the_page_header_has_a_live_updated_indicator_and_the_script_keeps_it_cu
     html = signed.get("/dashboard/").text
     assert 'id="updated-text"' in html and 'id="pulse"' in html
     assert "Updated " in (STATIC / "dashboard.js").read_text() and "lastUpdate" in (STATIC / "dashboard.js").read_text()
+
+
+def test_the_deal_page_shows_a_linkedin_draft_marked_not_sent(signed, demo, conn):
+    import json
+    did = deal_id(demo, "Harbor Auto Care")
+    conn.execute("INSERT INTO actions (idempotency_key, deal_id, type, autonomy_level, status, payload) "
+                 "VALUES ('li-ui', %s, 'linkedin_draft', 'auto', 'draft', %s::jsonb)",
+                 (did, json.dumps({"pieces": {"note": {"text": "NOTE TEXT"}, "message": {"text": "MSG TEXT"}}})))
+    html = signed.get(f"/dashboard/deals/{did}").text
+    assert "DRAFT - not sent" in html and "NOTE TEXT" in html and "MSG TEXT" in html

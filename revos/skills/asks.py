@@ -30,12 +30,16 @@ def asks_in(body: str, *, footer: tuple[str, ...] = ()) -> list[str]:
     return found
 
 
-def ask_problems(body: str, *, footer: tuple[str, ...] = ()) -> list[tuple[str, str]]:
-    """(code, message) for each way the email's asks are wrong: not exactly one, or one repeated."""
+def ask_problems(body: str, *, footer: tuple[str, ...] = (), expected: int = 1) -> list[tuple[str, str]]:
+    """(code, message) for each way the asks are wrong: not exactly `expected`, or one repeated."""
     asks = asks_in(body, footer=footer)
     problems: list[tuple[str, str]] = []
     keys = [_key(a) for a in asks]
-    if len(asks) != 1:
+    if expected == 0 and asks:
+        shown = "; ".join(f'"{a[:70]}"' for a in asks)
+        problems.append(("ask_count", "this text must make no request and ask no question, it has "
+                         f"{len(asks)} ({shown}). Write statements only"))
+    elif expected == 1 and len(asks) != 1:
         shown = "; ".join(f'"{a[:70]}"' for a in asks) or "none"
         problems.append(("ask_count", "the email must contain exactly one question or call to action, it has "
                          f"{len(asks)} ({shown}). The email's closing line already makes the one ask: "

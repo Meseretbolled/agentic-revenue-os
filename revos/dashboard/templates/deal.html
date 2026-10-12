@@ -76,6 +76,19 @@
   {% else %}<div class="empty-state small">{{ icon("mail", 22) }}<span class="muted">No emails.</span></div>{% endfor %}
 </section>
 
+{% if d.linkedin %}
+<section class="card"><h2>LinkedIn draft <span class="chip tone-warn">DRAFT - not sent</span></h2>
+  {% set pieces = d.linkedin.payload.get('pieces', {}) %}
+  {% for kind, label in (('note', 'Connection note'), ('message', 'Follow-up message')) %}{% if pieces.get(kind) %}
+    <p class="muted">{{ label }} · {{ pieces[kind].text|length }} characters</p>
+    <pre>{{ pieces[kind].text|mask }}</pre>
+  {% endif %}{% endfor %}
+  <p class="muted">Why a draft: {{ d.linkedin.reason or 'LinkedIn is draft-only in this system' }}.
+    {% if d.linkedin.status == 'cancelled' %}Blocked by policy: {{ d.linkedin.hold_reason }}. {% endif %}
+    Nothing was sent to LinkedIn; copy the text and send it yourself.</p>
+</section>
+{% endif %}
+
 <section class="card"><h2>Lessons cited</h2>
   {% for l in d.lessons %}<p><strong>L{{ l.id }}</strong> {{ l.text|mask }} <span class="muted">· shaped {{ (l.used_in or 'an action').replace('_',' ') }} · outcome {{ l.outcome }}</span></p>
   {% else %}<div class="empty-state small">{{ icon("book", 22) }}<span class="muted">No lesson shaped this deal's drafts.</span></div>{% endfor %}

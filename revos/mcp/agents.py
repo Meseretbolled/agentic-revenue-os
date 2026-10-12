@@ -23,6 +23,7 @@ AGENT_SCOPES: dict[str, frozenset[str]] = {
     "outreach": frozenset({"crm.get_deal", "crm.get_contact", "crm.get_company", "lessons.search",
                            "lessons.get", "casestudies.list", "casestudies.pick",
                            "casestudies.get"}),
+    "linkedin": frozenset({"crm.get_deal", "crm.get_contact", "crm.get_company", "casestudies.pick"}),
     "reply": frozenset({"crm.get_deal", "crm.get_contact", "lessons.search", "casestudies.pick",
                         "casestudies.get"}),
     "meeting": frozenset({"crm.get_deal", "crm.get_contact", "crm.get_company", "lessons.search"}),

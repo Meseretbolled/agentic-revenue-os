@@ -54,8 +54,17 @@ def model_text_issues(draft: Draft, request: DraftRequest, written: str) -> list
         if value and value not in draft.body:
             issues.append(Issue("footer_missing", f"the email lost its {key.replace('_', ' ')}", None))
     footer = tuple(str(request.context.get(k) or "").strip() for k in FOOTER_KEYS)
-    for code, message in ask_problems(draft.body, footer=footer):         # exactly one ask, never repeated
-        issues.append(Issue(code, message, written))
+    for code, message in ask_problems(draft.body, footer=footer, expected=request.expected_asks):
+        issues.append(Issue(code, message, written))              # the right number of asks, never repeated
+    if request.max_chars is not None and len(draft.body) > request.max_chars:
+        issues.append(Issue("too_long", f"the finished text is {len(draft.body)} characters, over the "
+                            f"limit of {request.max_chars}: write a shorter line", written))
+    if request.label_demo_facts:
+        items = request.evidence.items
+        cited = {e for c in draft.claims for e in c.evidence if e in items}
+        if any(items[e].demo for e in cited) and "fictional demo profile" not in draft.body.lower():
+            issues.append(Issue("demo_label_missing", "a fact from a fictional demo profile must be written "
+                                "with its label: say it comes from a \"fictional demo profile\"", written))
     return issues
 
 

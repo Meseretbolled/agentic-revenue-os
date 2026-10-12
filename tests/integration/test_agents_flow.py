@@ -448,12 +448,12 @@ def test_knowledge_will_not_store_a_lesson_from_a_flagged_quote(conn, ro_conn, p
     assert conn.execute("SELECT count(*) FROM lessons").fetchone()[0] == 0
 
 
-def test_all_ten_agents_exist_with_the_declared_kinds():
+def test_all_eleven_agents_exist_with_the_declared_kinds():
     from revos.agents.registry import AGENTS
     from revos.mcp.agents import AGENT_SCOPES
-    assert set(AGENTS) == set(AGENT_SCOPES) and len(AGENTS) == 10
+    assert set(AGENTS) == set(AGENT_SCOPES) and len(AGENTS) == 11
     deterministic = {n for n, s in AGENTS.items() if s.kind == "deterministic"}
     assert deterministic == {"enrichment", "scoring", "qualification", "contract_io", "tracking"}
     assert {n for n, s in AGENTS.items() if s.kind == "judgement"} == {
-        "outreach", "reply", "meeting", "call_intel", "knowledge"}
+        "outreach", "reply", "meeting", "call_intel", "knowledge", "linkedin"}
     assert Slot and LoopLimitExceeded

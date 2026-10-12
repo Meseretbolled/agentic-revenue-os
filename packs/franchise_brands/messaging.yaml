@@ -101,3 +101,26 @@ templates:
 
       {{ unsubscribe_line }}
       {{ postal_address }}
+
+# LinkedIn DRAFTS (a person copies and sends them; nothing in the system can send to LinkedIn). The model writes
+# only {{ personalised_line }}; the rest is this wording. {{ demo_label }} is filled in by code for a lead whose
+# facts come from a fictional demo profile. The note asks nothing (LinkedIn's limit is 300 characters); the
+# message holds the one ask.
+linkedin:
+  tone:
+    - Warm and brief; one specific observation about their local footprint, no hype words.
+    - Never state a number, customer or result that is not in the case-study library.
+  note_max_chars: 280
+  message_max_chars: 900
+  use_case_study: true
+  note_template: "{{ demo_label }}Hi {{ first_name }}, {{ personalised_line }} I would be glad to connect. {{ sender_name }}"
+  message_template: |-
+    {{ demo_label }}Hi {{ first_name }}, thanks for connecting. {{ personalised_line }}
+
+    Cool AI brings Create, Activate and Optimize into one platform, so local campaigns can scale without losing brand consistency or compliance.{% if case_study %} One example: {{ case_study.customer }} ({{ case_study.label }}). Source: {{ case_study.source_url }}{% endif %}
+
+    Would a short call be useful?
+
+    {{ sender_name }}
+  note_fallback: "I have been reading about local campaigns at your company."
+  message_fallback: "I wanted to share how we approach local campaigns."

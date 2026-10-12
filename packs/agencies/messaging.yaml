@@ -148,3 +148,26 @@ templates:
 
       {{ unsubscribe_line }}
       {{ postal_address }}
+
+# LinkedIn DRAFTS (a person copies and sends them; nothing in the system can send to LinkedIn). The model writes
+# only {{ personalised_line }}; the rest is this wording. {{ demo_label }} is filled in by code for a lead whose
+# facts come from a fictional demo profile. The note asks nothing; the message holds the one ask. Agencies get no
+# case study in the LinkedIn message: it stays short and peer-to-peer.
+linkedin:
+  tone:
+    - Peer to peer and short; one specific observation about how they run client work, no hype words.
+    - Never promise a capability (white-label, an integration, a margin) that is not stated in this pack.
+  note_max_chars: 250
+  message_max_chars: 600
+  use_case_study: false
+  note_template: "{{ demo_label }}Hi {{ first_name }}, {{ personalised_line }} Glad to connect with a fellow agency person. {{ sender_name }}"
+  message_template: |-
+    {{ demo_label }}Hi {{ first_name }}, thanks for connecting. {{ personalised_line }}
+
+    Cool AI brings Create, Activate and Optimize into one platform, so an agency can run and measure campaigns for several clients in one place.
+
+    Would a short call be useful?
+
+    {{ sender_name }}
+  note_fallback: "I have been reading about how your team runs client campaigns."
+  message_fallback: "I wanted to share how we think about running several clients in one place."

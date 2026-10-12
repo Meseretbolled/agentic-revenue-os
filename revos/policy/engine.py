@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from revos.domain.enums import AutonomyLevel, AutonomyMode, Outcome, Tier
 from revos.policy.config import (
+    CLAIM_CHECKED_TYPES,
     DRAFT_ONLY_TYPES,
     EMAIL_BODY_TYPES,
     OUTBOUND_TYPES,
@@ -73,13 +74,14 @@ def decide(
 
     outbound = kind in OUTBOUND_TYPES
     blocks: list[str] = []
-    if outbound:
+    if outbound or kind in CLAIM_CHECKED_TYPES:
         if request.contact_suppressed:
             blocks.append("suppressed")
         if request.injection_flagged:
             blocks.append("injection_flagged")
-        if kind in EMAIL_BODY_TYPES and request.claim_check_passed is not True:
+        if kind in CLAIM_CHECKED_TYPES and request.claim_check_passed is not True:
             blocks.append("claim_check_failed")
+    if outbound:
         # A discount over the pack's maximum is a hard block. There is no approval that lifts it.
         if request.discount_pct is not None and (
                 config.max_discount_pct is None or request.discount_pct > config.max_discount_pct):

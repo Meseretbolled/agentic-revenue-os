@@ -200,6 +200,11 @@ def deal(conn: psycopg.Connection, deal_id: str, now: datetime) -> dict[str, Any
         "('pending', 'awaiting_approval', 'approved') ORDER BY created_at",
         (deal_id,),
     ).fetchall()
+    linkedin = cur.execute(
+        "SELECT a.status, a.hold_reason, a.created_at, a.payload, (SELECT p.reason FROM agent_proposals p "
+        "WHERE p.action_id = a.id LIMIT 1) AS reason FROM actions a WHERE a.deal_id = %s AND "
+        "a.type = 'linkedin_draft' ORDER BY a.created_at DESC LIMIT 1", (deal_id,)
+    ).fetchone()
     owner = cur.execute(
         "SELECT agent FROM agent_runs WHERE deal_id = %s ORDER BY started_at DESC LIMIT 1", (deal_id,)
     ).fetchone()
@@ -217,6 +222,7 @@ def deal(conn: psycopg.Connection, deal_id: str, now: datetime) -> dict[str, Any
         "io": io,
         "emails": emails,
         "lessons": lessons,
+        "linkedin": linkedin,
         "pending": pending,
         "age": age(d["created_at"], now),
         "owner": owner["agent"] if owner else "-",

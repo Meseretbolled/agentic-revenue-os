@@ -50,7 +50,7 @@ from revos.policy.engine import ActionRequest
 from revos.policy.gate import GateResult, run_approved_action
 from revos.policy.recipients import base_of, recipient_allowed
 from revos.policy.service import propose_action, release_veto_expired
-from revos.policy.settings import release_held_sends, veto_window_override
+from revos.policy.settings import kill_switch_on, release_held_sends, veto_window_override
 from revos.ports.calendar import Calendar, Slot
 from revos.ports.clock import Clock
 from revos.ports.esign import ESign
@@ -62,6 +62,7 @@ from revos.runtime import lessons as lesson_loop
 from revos.runtime.events import record_event
 from revos.runtime.quarantine import record_quarantine
 from revos.segments.loader import Pack
+from revos.skills import linkedin as linkedin_skill
 from revos.skills.call_matching import DealFacts, match_call
 from revos.skills.claims import deterministic_check
 from revos.skills.crm_fields import call_summary, outreach_status, sequence_day
@@ -397,6 +398,9 @@ class Orchestrator:
         if atype in {"first_touch", "follow_up"}:
             return ActionRequest(atype, tier=tier, body=str(payload.get("body", "")),
                                  claim_check_passed=self._recheck_claims(deal, pack, payload))
+        if atype == "linkedin_draft":
+            return ActionRequest(atype, tier=tier, body=str(payload.get("body", "")),
+                                 claim_check_passed=self._recheck_linkedin(deal, pack, payload))
         if atype == "send_io":
             check = validate_io(pack, fields, today=self.clock.now().date(),
                                 signer_allowed=self._signer_allowed())
@@ -447,6 +451,43 @@ class Orchestrator:
             Claim(c["text"], tuple(c["evidence"])) for c in payload.get("claims", [])))
         issues = deterministic_check(draft, evidence_from_fields(deal["fields"] or {}), approved, names)
         return not issues
+
+    def _recheck_linkedin(self, deal: Mapping[str, Any], pack: Pack, payload: Mapping[str, Any]) -> bool:
+        """Both LinkedIn pieces re-checked against the DATABASE's facts and the pack's own wording."""
+        if pack.messaging.linkedin is None:
+            return False
+        study = next((c for c in pack.case_studies if c.id == payload.get("case_study_id")), None)
+        evidence = evidence_from_fields(deal["fields"] or {})
+        sender = self.identity.sender_name
+        context = linkedin_skill.build_context(deal["company_name"] or "", deal["contact_name"], sender,
+                                               study, evidence)
+        return not linkedin_skill.recheck(pack, sender, deal["company_name"] or "", deal["contact_name"],
+                                          study, evidence, context, payload)
+
+    def handle_linkedin(self, deal_id: UUID) -> PipelineResult:
+        """Draft the LinkedIn note and message for a deal, once. A draft for a person to copy: nothing here
+        or anywhere else can send to LinkedIn. The kill switch stops new drafts."""
+        stage = self._deal(deal_id)["stage"]
+        if kill_switch_on(self.conn):
+            write_audit(self.conn, "orchestrator", "linkedin.blocked", deal_id,
+                        {"reason": "the kill switch is on; no LinkedIn draft was created"})
+            return PipelineResult("held", stage, self.runner.name, "the kill switch is on")
+        try:
+            run = self.run_agent(deal_id, "linkedin", "linkedin")
+            if run.status != "completed":
+                return PipelineResult("needs_human", stage, self.runner.name, run.human_reason,
+                                      runs=(("linkedin", run.status),))
+            applied = self.apply_run(run, deal_id)
+        except tuple(cls for cls, _ in HUMAN_CAUSES) as exc:
+            return PipelineResult("needs_human", stage, self.runner.name, f"{cause_of(exc)}: {exc}")
+        first = applied[0] if applied else None
+        if first is not None and self.notifier is not None:
+            record_event(self.conn, f"slack:linkedin:{first['action_id']}", "slack.linkedin",
+                         {"action_id": str(first["action_id"])}, self.clock)
+        return PipelineResult("drafted", stage, self.runner.name, None,
+                              action_id=first["action_id"] if first else None,
+                              decision=first["outcome"] if first else None,
+                              runs=(("linkedin", run.status),))
 
     def _notify(self, action_id: UUID) -> None:
         """Ask for the action's Slack message to be posted or brought up to date (a job, so a Slack
@@ -1535,6 +1576,10 @@ class Orchestrator:
                 self.notifier.post_call_summary(UUID(job.payload["deal_id"]), job.payload["transcript_id"],
                                                 job.payload["title"])
 
+        def slack_linkedin(_conn: psycopg.Connection, job: Any) -> None:
+            if self.notifier is not None:
+                self.notifier.post_linkedin_draft(UUID(job.payload["action_id"]))
+
         def calls_poll(_conn: psycopg.Connection, job: Any) -> None:
             self.poll_calls()
 
@@ -1544,7 +1589,8 @@ class Orchestrator:
         def digest(_conn: psycopg.Connection, job: Any) -> None:
             sweeps.digest(self.conn, self.clock, self.notifier)
 
-        return {"slack.call": slack_call, "calls.poll": calls_poll, "slack.sync": slack_sync,
+        return {"slack.call": slack_call, "slack.linkedin": slack_linkedin, "calls.poll": calls_poll,
+                "slack.sync": slack_sync,
                 "tracking.stall_scan": stall_scan, "tracking.digest": digest,
                 "email.poll": poll,
                 "signature.event": signature_event, "lead.created": lead_created,

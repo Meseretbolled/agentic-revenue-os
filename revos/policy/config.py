@@ -21,8 +21,11 @@ L = AutonomyLevel
 OUTBOUND_TYPES = frozenset({"first_touch", "follow_up", "send_io"})
 # Outbound types whose body is model-written text, so a claim check applies.
 EMAIL_BODY_TYPES = frozenset({"first_touch", "follow_up"})
-# Never sent by the system; queued as a draft for a person.
-DRAFT_ONLY_TYPES = frozenset({"social_message"})
+# Never sent by the system; queued as a draft for a person. There is no provider for these types, so
+# nothing in the system can send them: a person copies the text and sends it.
+DRAFT_ONLY_TYPES = frozenset({"social_message", "linkedin_draft"})
+# Types whose text is model-written and must pass the claim check before the policy lets them stand.
+CLAIM_CHECKED_TYPES = EMAIL_BODY_TYPES | {"linkedin_draft"}
 
 PRICE_RULE_KEY = "price_message"
 
@@ -46,6 +49,7 @@ DEFAULT_LEVELS: Mapping[str, AutonomyLevel] = {
     "generate_io": L.AUTO,
     "send_io": L.AUTO,
     "social_message": L.NEEDS_APPROVAL,
+    "linkedin_draft": L.AUTO,
     "lesson_write": L.AUTO,
     "book_meeting": L.AUTO,
     "handoff": L.AUTO,

@@ -25,7 +25,7 @@ case_studies:
       - {label: Geographic reach, value: "2.6x"}
       - {label: CPA, value: "26% lower"}
       - {label: Locations, value: "140+"}
-    use_for: [first_touch]
+    use_for: [first_touch, linkedin]
     source_url: "https://cool.co/wp-content/uploads/2026/06/NVA_Ethos_Veterinary_COOL_AI-case-study-insights.pdf"
     source_verified: true
     label: vendor-reported
@@ -37,7 +37,7 @@ case_studies:
       - {label: Daily revenue, value: "+29%"}
       - {label: Daily orders, value: "+24%"}
       - {label: Conversions from net-new demand, value: "39%"}
-    use_for: [first_touch]
+    use_for: [first_touch, linkedin]
     source_url: "https://cool.co/blog/case-study/luxury-retail-brand/"
     source_verified: true
     label: vendor-reported
@@ -45,7 +45,7 @@ case_studies:
     customer: Pearle Vision
     summary: "Franchisee campaigns."
     tags: [franchise, general]
-    use_for: [first_touch]
+    use_for: [first_touch, linkedin]
     source_url: "https://cool.co/"
     source_verified: true
     label: public testimonial

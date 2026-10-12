@@ -216,3 +216,21 @@ def test_cli_validates_packs(tmp_path, pack_copy) -> None:
     bad = runner.invoke(app, ["packs", str(pack_copy.parent)])
     assert bad.exit_code == 1 and "icp.yaml: weights" in bad.output
     shutil.rmtree(pack_copy)
+
+
+def test_every_pack_with_linkedin_wording_stays_within_linkedins_limits() -> None:
+    from revos.segments import load_all
+    from tests.conftest import PACKS_DIR
+    packs = load_all(PACKS_DIR)
+    with_linkedin = [p for p in packs.values() if p.messaging.linkedin is not None]
+    assert len(with_linkedin) == len(packs)
+    for pack in with_linkedin:
+        assert pack.messaging.linkedin.note_max_chars <= 300, pack.id
+
+
+def test_ask_rules_for_a_text_that_must_ask_nothing() -> None:
+    from revos.skills.asks import ask_problems
+    assert ask_problems("Hi Sam, glad to connect.", expected=0) == []
+    assert ask_problems("Hi Sam, would a call help?", expected=0)[0][0] == "ask_count"
+    assert ask_problems("Would a call help?", expected=1) == []
+    assert ask_problems("Would a call help? Can we talk?", expected=1)[0][0] == "ask_count"

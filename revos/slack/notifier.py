@@ -136,6 +136,40 @@ class SlackNotifier:
                               (transcript_id, posted.channel, posted.ts))
         return True
 
+    def post_linkedin_draft(self, action_id: UUID) -> bool:
+        """One Slack message per LinkedIn draft, marked "DRAFT - not sent", with the written reason. There are
+        no buttons: nothing here can send it. A person copies the text into LinkedIn."""
+        row = self.conn.cursor(row_factory=dict_row).execute(
+            "SELECT a.status, a.payload, (SELECT p.reason FROM agent_proposals p WHERE p.action_id = a.id "
+            "LIMIT 1) AS reason, c.full_name, co.name AS company "
+            "FROM actions a LEFT JOIN contacts c ON c.id = a.contact_id "
+            "LEFT JOIN deals d ON d.id = a.deal_id LEFT JOIN companies co ON co.id = d.company_id "
+            "WHERE a.id = %s AND a.type = 'linkedin_draft'", (action_id,)).fetchone()
+        if row is None or row["status"] != "draft":
+            return False
+        pieces = (row["payload"] or {}).get("pieces") or {}
+        who = f"{row['full_name'] or 'the contact'} at {row['company'] or 'their company'}"
+        parts = [f"*Connection note* ({len(pieces.get('note', {}).get('text', ''))} characters)\n"
+                 f"{pieces.get('note', {}).get('text', '')}",
+                 f"*Follow-up message*\n{pieces.get('message', {}).get('text', '')}"]
+        why = row["reason"] or "LinkedIn is draft-only in this system"
+        blocks = [{"type": "section", "text": {"type": "mrkdwn",
+                                               "text": f":memo: *DRAFT - not sent* · LinkedIn · {who}"}},
+                  *({"type": "section", "text": {"type": "mrkdwn", "text": part[:2900]}} for part in parts),
+                  {"type": "context", "elements": [{"type": "mrkdwn", "text":
+                   f"Why a draft: {why}. {_claim_check(row['payload'] or {}, row['status'])}. "
+                   "Nothing was sent to LinkedIn and nothing in this system can send there: copy the text "
+                   "and send it yourself."}]}]
+        with self.conn.transaction():
+            self.conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"linkedin:{action_id}",))
+            if self.conn.execute("SELECT 1 FROM slack_messages WHERE kind = 'linkedin' AND ref = %s",
+                                 (str(action_id),)).fetchone():
+                return False
+            posted = self.slack.post(self.channel, f"DRAFT - not sent: LinkedIn draft for {who}", blocks)
+            self.conn.execute("INSERT INTO slack_messages (kind, ref, channel, ts, state) "
+                              "VALUES ('linkedin', %s, %s, %s, 'posted')",
+                              (str(action_id), posted.channel, posted.ts))
+        return True
 
 
 def _claim_check(payload: Mapping[str, Any], status: str) -> str:

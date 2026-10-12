@@ -43,6 +43,9 @@ class DraftRequest:
     tone: tuple[str, ...] = ()           # the pack's tone rules
     lessons: tuple[Mapping[str, Any], ...] = ()   # cited lessons: {"id", "text"}; an angle, never a fact
     reply: UntrustedText | None = None   # the prospect's reply, fenced as untrusted data
+    max_chars: int | None = None         # the finished text must not be longer (a LinkedIn note: 300)
+    expected_asks: int = 1               # how many questions or requests the finished text may hold, exactly
+    label_demo_facts: bool = False       # a cited demo fact must carry its "fictional demo profile" label
 
 
 @dataclass(frozen=True)

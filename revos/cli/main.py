@@ -231,6 +231,39 @@ def reprocess_reply_command(deal_id: str, message_id: str = typer.Option(
     typer.echo(f"result: {result.status} (stage {result.stage}); label {result.label}; {result.reason or ''}")
 
 
+linkedin_app = typer.Typer(help="LinkedIn drafts for a person to copy. Nothing is sent to LinkedIn.")
+app.add_typer(linkedin_app, name="linkedin")
+
+
+@linkedin_app.command("draft")
+def linkedin_draft(deal_id: str) -> None:
+    """Draft the connection note and follow-up message for a deal (once per deal) and print them."""
+    from uuid import UUID
+
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    load_env_file()
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        orch = build_orchestrator(conn, ro, SystemClock())
+        result = orch.handle_linkedin(UUID(deal_id))
+        typer.echo(f"result: {result.status}; {result.decision or ''} {result.reason or ''}".rstrip())
+        row = conn.execute("SELECT status, hold_reason, payload FROM actions WHERE deal_id = %s AND "
+                           "type = 'linkedin_draft' ORDER BY created_at DESC LIMIT 1",
+                           (UUID(deal_id),)).fetchone()
+    if row is None:
+        raise typer.Exit(1)
+    status, hold, payload = row
+    typer.echo(f"action status: {status}" + (f" ({hold})" if hold else ""))
+    for kind in ("note", "message"):
+        text = payload["pieces"][kind]["text"]
+        typer.echo(f"\n--- {kind} ({len(text)} characters) ---\n{text}")
+    typer.echo("\nDRAFT - not sent. Nothing was sent to LinkedIn; copy the text and send it yourself.")
+
+
 @app.command("call-demo")
 def call_demo() -> None:
     """Feed a scripted, fictional call through the same transcript port the real Fireflies adapter
