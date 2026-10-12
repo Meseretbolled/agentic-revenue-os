@@ -17,7 +17,7 @@ const out = join(tools, "build");
 mkdirSync(out, { recursive: true });
 
 // width of each figure on the page, in mm (chosen so its text stays at 8pt or more)
-const WIDTH = { legend: 160, fig1a: 186, fig1b: 180, fig2: 178, fig3a: 128, fig3b: 90, fig3c: 91 };
+const WIDTH = { legend: 160, fig1a: 186, fig1b: 180, fig2: 178, fig3a: 186, fig3b: 150 };
 const mmConfig = join(tools, "mm.json");
 const pp = join(tools, "pp.json");
 
@@ -31,12 +31,7 @@ for (const m of blocks) {
     ["-p", pp, "-c", mmConfig, "-i", src, "-o", join(out, `${id}.png`), "-b", "white", "-s", "3"], { stdio: "inherit" });
   md = md.replace(m[0], `<p class="fig"><img src="${id}.png" style="width:${WIDTH[id]}mm"></p>`);
 }
-// two small figures that belong together sit side by side
-const figTag = (id) => `<p class="fig"><img src="${id}.png" style="width:${WIDTH[id]}mm"></p>`;
-md = md.replace(`${figTag("fig3b")}\n\n${figTag("fig3c")}`, `<div class="row">${figTag("fig3b")}${figTag("fig3c")}</div>`);
 const css = `
-.row { display: flex; justify-content: space-between; align-items: flex-start; break-inside: avoid; }
-.row .fig { margin: 1.2mm 0; }
 @page { size: A4; margin: 9mm 12mm 13mm 12mm; }
 body { font: 10pt/1.2 Helvetica, Arial, sans-serif; color: #111827; margin: 0; }
 h1 { font-size: 18pt; margin: 0 0 3mm; }

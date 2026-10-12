@@ -121,53 +121,42 @@ A deal's stage changes only through `transition_deal()` (a trigger refuses any o
 
 ```mermaid
 %% id=fig3a
-erDiagram
-  segments ||--o{ deals : "has"
-  companies ||--o{ deals : "has"
-  contacts ||--o{ deals : "main"
-  deals ||--o{ actions : "outbox"
-  deals ||--o{ messages : "has"
-  deals ||--o{ transcripts : "has"
-  deals ||--o{ documents : "IO"
-  segments {
-    text id PK
-  }
-  companies {
-    uuid id PK
-    text segment_id FK
-  }
-  contacts {
-    uuid id PK
-    uuid company_id FK
-    text email UK
-  }
-  deals {
-    uuid id PK
-    text stage
-    jsonb fields
-  }
-  actions {
-    uuid id PK
-    text idempotency_key UK
-    uuid deal_id FK
-    text status
-  }
-  messages {
-    bigint id PK
-    uuid deal_id FK
-  }
-  transcripts {
-    bigint id PK
-    uuid deal_id FK
-  }
-  documents {
-    bigint id PK
-    uuid deal_id FK
-    int version
-  }
+flowchart TB
+  SEG[("segments<br/>one per customer pack")]:::store
+  COM[("companies<br/>name, domain")]:::store
+  CON[("contacts<br/>unique email, suppressed")]:::store
+  LES[("lessons<br/>tags, confidence")]:::store
+  CS[("case_studies<br/>source link, label")]:::store
+  DEAL[("deals<br/>stage, score, fields")]:::store
+  ACT[("actions<br/>the outbox: key, status")]:::store
+  MSG[("messages<br/>emails in and out")]:::store
+  TR[("transcripts<br/>call text, extracted")]:::store
+  DOC[("documents<br/>each IO version")]:::store
+  LU[("lesson_uses<br/>outcome per use")]:::store
+  CSS[("case_study_sends<br/>who got which")]:::store
+  SEG --> DEAL
+  COM --> DEAL
+  CON --> DEAL
+  LES --> LU
+  CS --> CSS
+  DEAL --> ACT
+  DEAL --> MSG
+  DEAL --> TR
+  DEAL --> DOC
+  DEAL --> LU
+  DEAL --> CSS
+  classDef store fill:#fef9c3,stroke:#ca8a04,stroke-width:1.5px;
 ```
 
-**Fig 3: data model (migrations 0001 to 0015), parts a to c.** a: records and the outbox; b: lessons and case studies; c: queue, audit and LLM ledger. There is no separate outbox, timer, IO-terms or signature-event table: the outbox is `actions`, timers are `jobs.run_at`, IO terms live in `deals.fields` (each rendered IO is a `documents` row), signature events are `events` and `audit_log` rows, and calls are `transcripts` and `held_calls`.
+```mermaid
+%% id=fig3b
+flowchart LR
+  EV[("events<br/>unique key")]:::store --> JB[("jobs<br/>lease, run_at, status")]:::store --> DL[("dead_letters<br/>error, acknowledged")]:::store
+  DL ~~~ AUD[("audit_log<br/>append-only, no FK")]:::store ~~~ SP[("llm_spend<br/>model, cost, tokens")]:::store
+  classDef store fill:#fef9c3,stroke:#ca8a04,stroke-width:1.5px;
+```
+
+**Fig 3: data model (migrations 0001 to 0015), parts a and b.** Arrows are foreign keys (one to many); a shows the records and the learning tables around a deal, b the queue, audit and LLM ledger. There is no separate outbox, timer, IO-terms or signature-event table: the outbox is `actions`, timers are `jobs.run_at`, IO terms live in `deals.fields` (each rendered IO is a `documents` row), signature events are `events` and `audit_log` rows, and calls are `transcripts` and `held_calls`.
 
 ```mermaid
 %% id=fig2
@@ -222,66 +211,7 @@ stateDiagram-v2
 
 **Fig 2: stage machine.** Boxes list the fields needed to enter a stage; any live stage can reach `closed_lost` or `do_not_contact`.
 
-```mermaid
-%% id=fig3b
-erDiagram
-  lessons ||--o{ lesson_uses : "has"
-  deals ||--o{ lesson_uses : "in"
-  deals ||--o{ case_study_sends : "to"
-  case_studies ||--o{ case_study_sends : "has"
-  lessons {
-    bigint id PK
-    text[] tags
-    numeric confidence
-  }
-  lesson_uses {
-    bigint id PK
-    bigint lesson_id FK
-    text outcome
-  }
-  deals {
-    uuid id PK
-  }
-  case_studies {
-    bigint id PK
-    text source_url
-  }
-  case_study_sends {
-    bigint id PK
-    bigint case_study_id FK
-  }
-```
-
-```mermaid
-%% id=fig3c
-erDiagram
-  events ||--o{ jobs : "creates"
-  jobs ||--o{ dead_letters : "fails to"
-  events {
-    bigint id PK
-    text type
-  }
-  jobs {
-    bigint id PK
-    bigint event_id FK
-    text status
-  }
-  dead_letters {
-    bigint id PK
-    bigint job_id FK
-  }
-  audit_log {
-    bigint id PK
-    uuid deal_id
-    text event
-  }
-  llm_spend {
-    bigint id PK
-    numeric cost_usd
-  }
-```
-
-`events.idempotency_key` is unique. Left out of Fig 3: `approvals`, `agent_runs`, `agent_steps`, `agent_proposals`, `held_replies`, `held_calls`, `esign_attempts`, `send_counters`, `system_settings`, `slack_messages`, `slack_interactions`. `audit_log.deal_id` is deliberately not a foreign key.
+Left out of Fig 3: `approvals`, `agent_runs`, `agent_steps`, `agent_proposals`, `held_replies`, `held_calls`, `esign_attempts`, `send_counters`, `system_settings`, `slack_messages`, `slack_interactions`. `audit_log.deal_id` is deliberately not a foreign key.
 
 ## 6. Segments, skills and the lessons loop
 
