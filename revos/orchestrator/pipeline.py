@@ -911,11 +911,14 @@ class Orchestrator:
 
     # --- finished calls from the transcript service: matched with evidence, never guessed ----------
     def _open_deals(self) -> list[DealFacts]:
+        """The deals a finished call can belong to: those whose meeting is booked and not yet followed by a
+        call (stage `meeting`). A call cannot precede its meeting, so a deal still in outreach is never a
+        candidate: its call must not be taken (or held) before the prospect has even answered."""
         rows = self.conn.cursor(row_factory=dict_row).execute(
             "SELECT d.id, co.name AS company, c.email, d.fields->>'meeting_start' AS meeting_start "
             "FROM deals d JOIN contacts c ON c.id = d.contact_id "
             "LEFT JOIN companies co ON co.id = d.company_id "
-            "WHERE d.stage NOT IN ('closed_lost', 'do_not_contact', 'handoff', 'closed_won')").fetchall()
+            "WHERE d.stage = 'meeting'").fetchall()
         facts = []
         for r in rows:
             try:
@@ -926,8 +929,8 @@ class Orchestrator:
         return facts
 
     def ingest_transcript(self, transcript_id: str) -> str:
-        """Match one finished transcript to a deal and process it. Returns 'processed', 'seen',
-        'held' or 'missing'. Safe to call any number of times for the same id."""
+        """Match one finished transcript to a deal and process it. Returns 'processed', 'seen', 'held',
+        'waiting' (no deal has a booked meeting yet) or 'missing'. Safe to call any number of times."""
         if self.transcripts is None:
             return "missing"
         if self.conn.execute("SELECT 1 FROM transcripts WHERE external_id = %s UNION ALL "
@@ -937,7 +940,10 @@ class Orchestrator:
         transcript = self.transcripts.get(transcript_id)
         if transcript is None:
             return "missing"
-        match = match_call(transcript, self._open_deals())
+        candidates = self._open_deals()
+        if not candidates:
+            return "waiting"          # no meeting is booked yet: leave the recording alone and hold nothing
+        match = match_call(transcript, candidates)
         if match.deal_id is None:               # ambiguous, or no evidence at all
             with self.conn.transaction():
                 self.conn.execute(
@@ -1021,6 +1027,27 @@ class Orchestrator:
                               (self.clock.now(), transcript_id))
             write_audit(self.conn, actor, "call.assigned", deal_id, {"transcript": transcript_id})
         return self._process_call(deal_id, transcript, ["operator"])
+
+    def reset_call_match(self, transcript_id: str, actor: str) -> str:
+        """Forget that a recording was handled or held, so the next poll can match it afresh. Only for a
+        recording whose deal is closed, or one that is held; never a live deal's call. Audited."""
+        row = self.conn.execute(
+            "SELECT t.id, t.deal_id, d.stage FROM transcripts t JOIN deals d ON d.id = t.deal_id "
+            "WHERE t.external_id = %s", (transcript_id,)).fetchone()
+        held = self.conn.execute("SELECT 1 FROM held_calls WHERE external_id = %s",
+                                 (transcript_id,)).fetchone()
+        if row is None and held is None:
+            raise LookupError(f"nothing is recorded for transcript {transcript_id}")
+        if row is not None and row[2] not in CLOSED_STAGES:
+            raise LookupError("that call belongs to a deal that is still open: not forgotten")
+        with self.conn.transaction():
+            if row is not None:
+                self.conn.execute("DELETE FROM transcripts WHERE id = %s", (row[0],))
+            self.conn.execute("DELETE FROM held_calls WHERE external_id = %s", (transcript_id,))
+            write_audit(self.conn, actor, "call.match_state_reset", row[1] if row else None, {
+                "transcript": transcript_id, "was": "handled" if row else "held",
+                "from_stage": row[2] if row else None})
+        return "reset"
 
     def poll_calls(self) -> list[tuple[str, str]]:
         """Look for finished transcripts we have not handled. Idempotent per transcript id."""

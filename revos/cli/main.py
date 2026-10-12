@@ -93,6 +93,26 @@ def calls_assign(transcript_id: str, deal_id: str) -> None:
     typer.echo(f"{transcript_id}: {outcome} for deal {deal_id}")
 
 
+@calls_app.command("reset-match")
+def calls_reset_match(transcript_id: str) -> None:
+    """Forget that a recording was handled (for a closed deal) or held, so the next poll matches it afresh."""
+    from revos.adapters.clock import SystemClock
+    from revos.composition import build_orchestrator
+    from revos.db import connect_read_only, migrate
+    from revos.env import load_env_file
+    load_env_file()
+    with connect() as conn, connect_read_only() as ro:
+        conn.autocommit = True
+        migrate(conn)
+        orch = build_orchestrator(conn, ro, SystemClock())
+        try:
+            outcome = orch.reset_call_match(transcript_id, "operator")
+        except LookupError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+    typer.echo(f"{transcript_id}: {outcome}; the next poll can match it to a deal that has a booked meeting")
+
+
 @calls_app.command("reassign")
 def calls_reassign(transcript_id: str, deal_id: str) -> None:
     """Move a call handled for a CLOSED deal onto an open one and process it there (audited)."""

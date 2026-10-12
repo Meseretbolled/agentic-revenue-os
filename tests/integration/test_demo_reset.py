@@ -63,21 +63,21 @@ def test_a_reset_closes_every_open_deal_so_old_demo_deals_with_the_same_company_
         deal, _ = make_lead(conn, email=f"sam.lee+old{i}@brightside-optical.example", name="Old")
         force_stage(conn, deal, stage)
         old.append(deal)
-    assert len(rig.orch._open_deals()) == 4
+    assert len(rig.orch._open_deals()) == 1                     # only the one whose meeting is booked
     counts = cancel_pending_work(conn)
     assert counts["deals"] == 4 and rig.orch._open_deals() == []
     assert {r[0] for r in conn.execute("SELECT stage FROM deals")} == {"closed_lost"}
     assert len(audit(conn, "deal.stage_changed")) >= 4
-    # a transcript for that company now matches nothing: it is held, never attached to an old deal
+    # no deal has a booked meeting: the recording is left alone (not held, not taken)
     rig.world.transcripts.add(_transcript())
-    assert rig.orch.poll_calls() == [("call-r1", "held")]
-    assert audit(conn, "call.unmatched")[0]["reason"] == "none"
+    assert rig.orch.poll_calls() == [("call-r1", "waiting")]
+    assert audit(conn, "call.unmatched") == []
     assert conn.execute("SELECT count(*) FROM transcripts").fetchone()[0] == 0
-    # and a NEW live deal for the same company is the only candidate, so the call is matched to it
+    # and a NEW live deal for the same company with a booked meeting is the only candidate: matched to it
     fresh, _ = make_lead(conn, email="sam.lee+fresh@brightside-optical.example", name="Fresh")
     force_stage(conn, fresh, DealStage.MEETING)
     rig.world.transcripts.add(_transcript("call-r2", who=("sam.lee@brightside-optical.example",)))
-    assert rig.orch.poll_calls() == [("call-r1", "seen"), ("call-r2", "processed")]
+    assert dict(rig.orch.poll_calls())["call-r2"] == "processed"
     assert audit(conn, "call.matched", fresh) and not [d for d in old if audit(conn, "call.matched", d)]
 
 

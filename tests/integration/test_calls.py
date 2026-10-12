@@ -475,3 +475,70 @@ def test_resolve_signer_never_returns_a_name_that_is_an_address():
     assert resolve_signer("he signs", "", "") is None and resolve_signer(None, None, None) is None
     got = resolve_signer("Priya Nair, our Head of Finance priya@elsewhere.example, will sign", "Marcus Reyes", "VP")
     assert got is not None and got.name == "Marcus Reyes" and got.source == "lead_record"
+
+
+# --- a call can only belong to a deal whose meeting is booked ------------------------------------------------------------
+
+def test_a_recording_is_left_alone_until_some_deal_has_a_booked_meeting(conn, ro_conn, pack, clock):
+    rig = make_rig(conn, ro_conn, pack, clock, email="sam.lee@brightside-optical.example")
+    force_stage(conn, rig.deal_id, DealStage.OUTREACH)                  # the first email is out, no reply yet
+    rig.world.transcripts.add(call("call-early"))                       # the title names the company
+    assert rig.orch.poll_calls() == [("call-early", "waiting")]
+    assert rig.orch.poll_calls() == [("call-early", "waiting")]         # polled again: still nothing taken or held
+    assert conn.execute("SELECT count(*) FROM transcripts").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM held_calls").fetchone()[0] == 0
+    assert stage(conn) == "outreach" and audit(conn, "call.unmatched") == []
+
+    force_stage(conn, rig.deal_id, DealStage.MEETING)                   # the meeting is booked
+    assert rig.orch.poll_calls() == [("call-early", "processed")]
+    assert audit(conn, "call.matched", rig.deal_id)[0]["by"] == ["title"] or audit(conn, "call.matched", rig.deal_id)
+
+
+@pytest.mark.parametrize("stage_name", [DealStage.NEW, DealStage.SCORED, DealStage.OUTREACH, DealStage.REPLIED,
+                                        DealStage.QUALIFIED])
+def test_only_a_deal_in_the_meeting_stage_is_a_candidate(conn, ro_conn, pack, clock, stage_name):
+    rig = make_rig(conn, ro_conn, pack, clock, email="sam.lee@brightside-optical.example")
+    force_stage(conn, rig.deal_id, stage_name)
+    assert rig.orch._open_deals() == []
+
+
+def test_forgetting_a_recording_handled_for_a_closed_deal_lets_a_new_live_deal_take_it_by_itself(
+        conn, ro_conn, pack, clock):
+    from revos.orchestrator.transitions import transition_deal
+    old = meeting_rig(conn, ro_conn, pack, clock, email="sam.lee+old@brightside-optical.example")
+    rig = old
+    rig.world.transcripts.add(call("call-harbor"))
+    assert rig.orch.poll_calls() == [("call-harbor", "processed")]
+    transition_deal(conn, old.deal_id, DealStage.CLOSED_LOST, actor="test", reason="reset")
+    assert rig.orch.poll_calls() == [("call-harbor", "seen")]            # handled: never taken twice
+
+    with pytest.raises(LookupError, match="nothing is recorded"):
+        rig.orch.reset_call_match("never-seen", "operator")
+    assert rig.orch.reset_call_match("call-harbor", "operator") == "reset"
+    (row,) = audit(conn, "call.match_state_reset", old.deal_id)
+    assert row["transcript"] == "call-harbor" and row["was"] == "handled" and row["from_stage"] == "closed_lost"
+    assert conn.execute("SELECT count(*) FROM transcripts").fetchone()[0] == 0
+
+    fresh, _ = make_lead(conn, email="sam.lee+fresh@brightside-optical.example", name="Fresh")
+    force_stage(conn, fresh, DealStage.OUTREACH)
+    assert rig.orch.poll_calls() == [("call-harbor", "waiting")]         # not before the meeting is booked
+    force_stage(conn, fresh, DealStage.MEETING)
+    assert rig.orch.poll_calls() == [("call-harbor", "processed")]
+    assert audit(conn, "call.matched", fresh) and not audit(conn, "call.assigned")      # by itself, no assign
+
+
+def test_a_recording_on_a_live_deal_is_never_forgotten(conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock, email="sam.lee@brightside-optical.example")
+    rig.world.transcripts.add(call("call-live"))
+    rig.orch.poll_calls()
+    with pytest.raises(LookupError, match="still open"):
+        rig.orch.reset_call_match("call-live", "operator")
+    assert conn.execute("SELECT count(*) FROM transcripts").fetchone()[0] == 1
+
+
+def test_a_held_recording_can_be_forgotten_too(conn, ro_conn, pack, clock):
+    rig = meeting_rig(conn, ro_conn, pack, clock, email="sam.lee@brightside-optical.example")
+    rig.world.transcripts.add(call("call-none", title="Dentist chat", participants=("someone@else.org",)))
+    assert rig.orch.poll_calls() == [("call-none", "held")]
+    assert rig.orch.reset_call_match("call-none", "operator") == "reset"
+    assert conn.execute("SELECT count(*) FROM held_calls").fetchone()[0] == 0
