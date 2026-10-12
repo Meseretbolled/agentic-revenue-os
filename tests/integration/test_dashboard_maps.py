@@ -9,27 +9,31 @@ from fastapi.testclient import TestClient
 
 from revos.agents.registry import AGENTS
 from revos.dashboard import maps_data
+from revos.policy.audit import write_audit
 from tests.integration.test_dashboard import (  # noqa: F401  (fixtures)
     TUNNEL,
     app,
     cfg,
     client,
+    deal_id,
     demo,
     signed,
 )
 
 STATIC = Path("revos/dashboard/static")
-MAP_PAGES = ["/dashboard/architecture", "/dashboard/data-model"]
-MAP_APIS = ["/dashboard/api/architecture", "/dashboard/api/data-model"]
+MAP_PAGES = ["/dashboard/architecture", "/dashboard/data-model", "/dashboard/walkthrough"]
+MAP_APIS = ["/dashboard/api/architecture", "/dashboard/api/data-model", "/dashboard/api/walkthrough"]
 
 
-def test_both_map_pages_render_and_load_only_our_own_script(signed, demo):
-    for path in MAP_PAGES:
+def test_the_map_pages_render_and_load_only_our_own_script(signed, demo):
+    scripts = {"/dashboard/architecture": "maps.js", "/dashboard/data-model": "maps.js",
+               "/dashboard/walkthrough": "walkthrough.js"}
+    for path, script in scripts.items():
         html = signed.get(path).text
-        assert 'id="map"' in html and '<script src="/dashboard/static/maps.js"></script>' in html
+        assert f'<script src="/dashboard/static/{script}"></script>' in html
         assert not re.search(r"<script(?![^>]*\bsrc=)", html)          # no inline script
     nav = signed.get("/dashboard/").text
-    assert "System map" in nav and "Data map" in nav
+    assert "System map" in nav and "Data map" in nav and "Deal walkthrough" in nav
 
 
 def test_the_maps_need_a_signed_in_session(client):
@@ -41,7 +45,7 @@ def test_the_maps_need_a_signed_in_session(client):
 
 def test_the_maps_are_refused_through_the_public_tunnel(app):
     tunnel = TestClient(app, base_url=TUNNEL, follow_redirects=False)
-    for path in [*MAP_PAGES, *MAP_APIS, "/dashboard/static/maps.js"]:
+    for path in [*MAP_PAGES, *MAP_APIS, "/dashboard/static/maps.js", "/dashboard/static/walkthrough.js"]:
         assert tunnel.get(path).status_code == 404
 
 
@@ -90,7 +94,40 @@ def test_the_map_code_only_reads():
 
 
 def test_the_map_script_loads_nothing_from_outside_and_never_writes_html():
-    js = (STATIC / "maps.js").read_text()
-    urls = re.findall(r"https?://[^\s'\"]+", js)
-    assert urls == ["http://www.w3.org/2000/svg"]                                        # the SVG namespace only
-    assert "innerHTML" not in js and "eval(" not in js and "document.write" not in js
+    for name in ("maps.js", "walkthrough.js"):
+        js = (STATIC / name).read_text()
+        urls = re.findall(r"https?://[^\s'\"]+", js)
+        assert urls == ["http://www.w3.org/2000/svg"]                                    # the SVG namespace only
+        assert "innerHTML" not in js and "eval(" not in js and "document.write" not in js
+
+
+def test_the_walkthrough_has_sixteen_steps_that_only_light_real_boxes_and_arrows(signed, demo):
+    model = signed.get("/dashboard/api/walkthrough").json()
+    nodes, edges = {n["id"] for n in model["nodes"]}, {e["id"] for e in model["edges"]}
+    assert len(model["steps"]) == 16 and len(model["stages"]) == 12
+    for step in model["steps"]:
+        assert set(step["nodes"]) <= nodes and set(step["edges"]) <= edges and step["stage"] in model["stages"]
+    assert all(e["from"] in nodes and e["to"] in nodes for e in model["edges"])
+    agents = next(n for n in model["nodes"] if n["id"] == "agents")
+    assert agents["sub"] == "11: 5 rules, 6 model-judged"                         # counted from the registry
+
+
+def test_what_is_recorded_under_a_step_comes_from_that_deals_own_audit_log(signed, demo, conn):
+    deal = deal_id(demo, "Northwind Optical")
+    write_audit(conn, "orchestrator", "deal.stage_changed", deal, {"from": "enriched", "to": "scored"})
+    model = signed.get(f"/dashboard/api/walkthrough?deal={deal}").json()
+    assert model["deal"]["id"] == deal
+    scoring = next(s for s in model["steps"] if s["title"] == "Scoring ranks the lead")
+    assert [(r["event"], r["note"]) for r in scoring["recorded"]] == [("deal.stage_changed", "enriched -> scored")]
+    other = next(s for s in model["steps"] if s["title"] == "It goes out for signature (test mode)")
+    assert other["recorded"] == []                                               # no matching row: nothing is filled in
+
+
+def test_an_unknown_deal_falls_back_to_the_first_listed_one(signed, demo):
+    model = signed.get("/dashboard/api/walkthrough?deal=not-a-deal").json()
+    assert model["deal"]["id"] == model["deals"][0]["id"]
+
+
+def test_the_login_page_no_longer_explains_where_the_token_lives(client):
+    html = client.get("/dashboard/login").text
+    assert "DASHBOARD_TOKEN" not in html and "Dashboard token" in html

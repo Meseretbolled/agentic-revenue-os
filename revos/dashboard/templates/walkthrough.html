@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Deal walkthrough{% endblock %}
+{% block subtitle %}One real deal, step by step. The diagram and wording are the system's design; the lines marked Recorded are read from that deal's own audit log.{% endblock %}
+{% block refresh %}0{% endblock %}
+{% block body %}
+<section class="card wt" aria-labelledby="wt-h">
+  <div class="wt-bar">
+    <div class="card-title"><h2 id="wt-h">How a deal moves through the system</h2><span class="chip" id="wt-chip">Loading</span></div>
+    <div class="wt-controls">
+      <label class="wt-pick">Deal <select id="wt-deal" aria-label="Choose a deal"></select></label>
+      <button class="btn primary" id="wt-play" type="button">Play</button>
+      <button class="btn" id="wt-back" type="button">Back</button>
+      <button class="btn" id="wt-next" type="button">Next</button>
+      <button class="btn" id="wt-restart" type="button">Restart</button>
+      <label class="wt-pick">Speed <select id="wt-speed" aria-label="Speed"><option value="6000">Slow</option><option value="3500" selected>Normal</option><option value="1800">Fast</option></select></label>
+    </div>
+  </div>
+  <p class="muted small">Press Play, or step with the arrow keys. Click any box to see what it does. Deal stage:</p>
+  <ol class="wt-stages" id="wt-stages" aria-label="Deal stage"></ol>
+  <div class="map-scroll"><div id="wt-map" role="img" aria-label="The system, with the current step lit"></div></div>
+  <div class="wt-step" id="wt-step" aria-live="polite"></div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/dashboard/static/walkthrough.js"></script>{% endblock %}

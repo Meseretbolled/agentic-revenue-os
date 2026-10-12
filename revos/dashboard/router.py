@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from revos.adapters.spend import SpendLedger
-from revos.dashboard import actions, data, maps_data, words
+from revos.dashboard import actions, data, maps_data, maps_walkthrough, words
 from revos.dashboard.auth import COOKIE, PRE_COOKIE, SESSION_SECONDS, Auth
 from revos.modes import integration_modes
 from revos.policy.settings import effective_controls
@@ -317,7 +317,7 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
             pack_cache["all"] = load_all(packs_dir)
         return pack_cache["all"]
 
-    def architecture_json(conn: psycopg.Connection) -> dict[str, Any]:
+    def architecture_json(conn: psycopg.Connection, request: Request) -> dict[str, Any]:
         rows, _ = integration_rows()
         caps = [{"pack": p.id, "daily": p.policy.daily_cap, "per_domain": p.policy.domain_cap}
                 for p in packs().values()]
@@ -330,7 +330,19 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
             controls=effective_controls(conn, cfg.env, cfg.pack_veto_seconds),
             schedules=with_overrides(DEFAULT_SCHEDULES), caps=caps, criteria=criteria)
 
-    def json_api(path: str, build: Callable[[psycopg.Connection], dict[str, Any]]):
+    def walkthrough_json(conn: psycopg.Connection, request: Request) -> dict[str, Any]:
+        rows, _ = integration_rows()
+        by_service = {r["service"]: r["state"] for r in rows}
+        labels = {"gmail": by_service.get("Gmail", ""), "hubspot": by_service.get("HubSpot", ""),
+                  "slack": by_service.get("Slack", ""), "fireflies": by_service.get("Fireflies", ""),
+                  "dropbox": "TEST MODE", "calendar": "MOCK"}        # the last two are facts of the code
+        research = "Tavily (live)" if cfg.env.get("ENRICHMENT_MODE", "mock") == "tavily" else "mock (default)"
+        return maps_walkthrough.walkthrough(
+            conn, request.query_params.get("deal"), schedules=with_overrides(DEFAULT_SCHEDULES),
+            pack_count=len(packs()), integrations={k: {"mode_label": v} for k, v in labels.items()},
+            research_mode=research)
+
+    def json_api(path: str, build: Callable[[psycopg.Connection, Request], dict[str, Any]]):
         @router.get(path)
         def handler(request: Request) -> Response:
             if not cfg.auth.enabled:
@@ -338,14 +350,16 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
             if signed_in(request) is None:
                 return JSONResponse({"error": "sign in"}, status_code=401, headers=HEADERS)
             with reader() as conn:
-                return JSONResponse(build(conn), headers=HEADERS)
+                return JSONResponse(build(conn, request), headers=HEADERS)
 
         return handler
 
     page("/architecture", "architecture.html", "architecture", lambda conn, r: {})
     page("/data-model", "datamodel.html", "datamodel", lambda conn, r: {})
     json_api("/api/architecture", architecture_json)
-    json_api("/api/data-model", maps_data.data_model)
+    json_api("/api/data-model", lambda conn, request: maps_data.data_model(conn))
+    page("/walkthrough", "walkthrough.html", "walkthrough", lambda conn, r: {})
+    json_api("/api/walkthrough", walkthrough_json)
 
     # --- actions: each needs a signed-in session and a CSRF token, then runs the system's own code ---
     Handle = Callable[[psycopg.Connection, dict[str, str], dict[str, str]], actions.Result]
@@ -405,7 +419,8 @@ def build_router(cfg: DashboardConfig) -> APIRouter:
     # --- static files (our own CSS and JS only) -------------------------------------------------------------
     @router.get("/static/{name}")
     def static(name: str) -> Response:
-        kinds = {"dashboard.css": "text/css", "dashboard.js": "text/javascript", "maps.js": "text/javascript"}
+        kinds = {"dashboard.css": "text/css", "dashboard.js": "text/javascript", "maps.js": "text/javascript",
+                 "walkthrough.js": "text/javascript"}
         if name not in kinds:
             return PlainTextResponse("Not found", status_code=404)
         return Response(
